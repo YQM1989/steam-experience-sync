@@ -1,0 +1,150 @@
+.markdown-preview-view.steam-experience .steam-hero,
+.markdown-source-view.mod-cm6 .steam-hero {
+  position: relative;
+  width: min(100%, 960px);
+  aspect-ratio: 31 / 10;
+  margin: 20px auto 46px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.02)),
+    linear-gradient(135deg, rgba(36, 46, 66, 0.72), rgba(12, 14, 18, 0.3)),
+    var(--background-secondary);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.28);
+}
+
+.markdown-preview-view.steam-experience .steam-hero img,
+.markdown-source-view.mod-cm6 .steam-hero img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  border-radius: 12px;
+  background: #05070a;
+  box-shadow:
+    0 28px 72px rgba(0, 0, 0, 0.42),
+    0 0 0 1px rgba(255, 255, 255, 0.16);
+}
+
+.markdown-preview-view.steam-experience .steam-hero::after,
+.markdown-source-view.mod-cm6 .steam-hero::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(180deg, rgba(0, 0, 0, 0.02) 35%, rgba(0, 0, 0, 0.68) 100%),
+    linear-gradient(90deg, rgba(0, 0, 0, 0.42), rgba(0, 0, 0, 0.04) 55%);
+  pointer-events: none;
+}
+
+.markdown-preview-view.steam-experience .steam-hero-info,
+.markdown-source-view.mod-cm6 .steam-hero-info {
+  position: absolute;
+  left: 28px;
+  right: 28px;
+  bottom: 24px;
+  z-index: 1;
+}
+
+.markdown-preview-view.steam-experience .steam-game-title,
+.markdown-source-view.mod-cm6 .steam-game-title {
+  color: #fff;
+  font-size: 1.75rem;
+  font-weight: 700;
+  line-height: 1.2;
+  text-align: left;
+  text-shadow: 0 2px 18px rgba(0, 0, 0, 0.65);
+}
+
+.markdown-preview-view.steam-experience .steam-game-meta,
+.markdown-source-view.mod-cm6 .steam-game-meta {
+  color: rgba(255, 255, 255, 0.78);
+  font-size: 0.95rem;
+  margin-top: 6px;
+  text-align: left;
+  text-shadow: 0 2px 14px rgba(0, 0, 0, 0.72);
+}
+
+.markdown-preview-view.steam-experience .steam-shot,
+.markdown-source-view.mod-cm6 .steam-shot {
+  display: grid;
+  grid-template-columns: minmax(360px, 1.75fr) minmax(240px, 0.9fr);
+  gap: 22px;
+  align-items: stretch;
+  width: min(100%, 960px);
+  margin: 22px auto 34px;
+}
+
+.markdown-preview-view.steam-experience .steam-shot-image,
+.markdown-source-view.mod-cm6 .steam-shot-image {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  border-radius: 8px;
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.22);
+}
+
+.markdown-preview-view.steam-experience .steam-shot-side,
+.markdown-source-view.mod-cm6 .steam-shot-side {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-width: 0;
+  padding: 20px 22px;
+  border-radius: 8px;
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+}
+
+.markdown-preview-view.steam-experience .steam-shot-label,
+.markdown-source-view.mod-cm6 .steam-shot-label {
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  font-weight: 700;
+  margin-bottom: 10px;
+}
+
+.markdown-preview-view.steam-experience .steam-shot-label::before,
+.markdown-source-view.mod-cm6 .steam-shot-label::before {
+  content: "”";
+  margin-right: 6px;
+  color: var(--text-faint);
+  font-size: 1.4rem;
+  vertical-align: -0.1em;
+}
+
+.markdown-preview-view.steam-experience .steam-shot-side p,
+.markdown-source-view.mod-cm6 .steam-shot-side p {
+  margin: 0 0 18px;
+  line-height: 1.7;
+}
+
+.markdown-preview-view.steam-experience .steam-shot-side a,
+.markdown-source-view.mod-cm6 .steam-shot-side a {
+  margin-top: auto;
+  font-size: 0.92rem;
+}
+
+@media (max-width: 700px) {
+  .markdown-preview-view.steam-experience .steam-hero,
+  .markdown-source-view.mod-cm6 .steam-hero {
+    width: 100%;
+    margin-bottom: 30px;
+  }
+
+  .markdown-preview-view.steam-experience .steam-game-title,
+  .markdown-source-view.mod-cm6 .steam-game-title {
+    font-size: 1.45rem;
+  }
+
+  .markdown-preview-view.steam-experience .steam-shot,
+  .markdown-source-view.mod-cm6 .steam-shot {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .markdown-preview-view.steam-experience .steam-shot-side,
+  .markdown-source-view.mod-cm6 .steam-shot-side {
+    padding: 16px;
+  }
+}

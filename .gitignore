@@ -1,0 +1,18 @@
+﻿# local secrets
+.env
+
+# runtime state if user chooses project-local state
+.state/
+
+# dependencies / logs
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
