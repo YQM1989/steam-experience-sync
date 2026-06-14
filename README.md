@@ -62,6 +62,8 @@ node src/index.mjs
 node src/index.mjs --dry-run --limit 5
 node src/index.mjs --pages 2
 node src/index.mjs --since-id 3739718595
+node src/index.mjs --all --appid 2358720 --dry-run --request-delay-ms 10000
+node src/index.mjs --all --appid 2358720 --max-matches 5 --request-delay-ms 10000
 node src/index.mjs --all --dry-run
 node src/index.mjs --all
 node src/index.mjs --all --request-delay-ms 8000
@@ -75,6 +77,7 @@ node src/index.mjs --all --request-delay-ms 8000
 
 - 第一次先跑 `node src/index.mjs --all --dry-run --request-delay-ms 8000`。
 - 确认输出目标正常后，再跑 `node src/index.mjs --all --request-delay-ms 8000`。
+- 想一款游戏一款游戏补历史时，用 `--appid`。如果仍然遇到限流，再加 `--max-matches` 分批，例如 `node src/index.mjs --all --appid 2358720 --max-matches 5 --request-delay-ms 10000`。
 - 如果截图很多，把 `--all` 拆成 `--pages 3`、`--pages 5` 逐步增加，而不是连续高频全量回扫。
 - 不使用 Cookie、登录态、代理池或绕过 Cloudflare / Steam 防护的方式；这个工具只同步公开页面。
 

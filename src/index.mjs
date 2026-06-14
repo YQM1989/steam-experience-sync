@@ -47,11 +47,16 @@ async function main() {
 
   const coverMap = new Map();
   const processed = [];
+  let matchedCount = 0;
   for (const [index, id] of unseen.reverse().entries()) {
     if (index > 0 && config.requestDelayMs > 0) {
       await sleep(config.requestDelayMs);
     }
     const item = await fetchScreenshotDetail(id);
+    if (config.appids.length > 0 && !config.appids.includes(String(item.appid))) {
+      continue;
+    }
+    matchedCount += 1;
     item.playtimeMinutes = playtimeMap.get(String(item.appid)) ?? null;
     if (!coverMap.has(String(item.appid))) {
       coverMap.set(String(item.appid), await fetchGameCover(item.appid).catch(() => null));
@@ -60,12 +65,14 @@ async function main() {
 
     if (config.dryRun) {
       console.log(formatDryRun(item, config.outputDir));
+      if (config.maxMatches !== 'all' && matchedCount >= config.maxMatches) break;
       continue;
     }
 
     const target = await upsertExperienceNote(config.outputDir, item);
     processed.push(id);
     console.log(`Wrote ${target}`);
+    if (config.maxMatches !== 'all' && matchedCount >= config.maxMatches) break;
   }
 
   if (!config.dryRun && processed.length > 0) {
@@ -92,7 +99,9 @@ function readConfig(args) {
     stateFile: path.resolve(vaultDir, fromVaultPath(statePath)),
     pages: parseCount(args.pages || process.env.STEAM_LOOKBACK_PAGES || 1),
     limit: parseCount(args.limit || process.env.STEAM_LIMIT || 20),
+    maxMatches: parseCount(args.maxMatches || process.env.STEAM_MAX_MATCHES || 'all'),
     requestDelayMs: parseNonNegativeInteger(args.requestDelayMs || process.env.STEAM_REQUEST_DELAY_MS || DEFAULT_REQUEST_DELAY_MS),
+    appids: parseList(args.appid || args.appids || process.env.STEAM_APPIDS || ''),
     resync: Boolean(args.resync),
     dryRun: Boolean(args.dryRun),
   };
@@ -113,8 +122,11 @@ function parseArgs(argv) {
     else if (arg === '--vault') out.vault = argv[++i];
     else if (arg === '--output') out.output = argv[++i];
     else if (arg === '--state') out.state = argv[++i];
+    else if (arg === '--appid') out.appid = argv[++i];
+    else if (arg === '--appids') out.appids = argv[++i];
     else if (arg === '--pages') out.pages = argv[++i];
     else if (arg === '--limit') out.limit = argv[++i];
+    else if (arg === '--max-matches') out.maxMatches = argv[++i];
     else if (arg === '--request-delay-ms') out.requestDelayMs = argv[++i];
     else if (arg === '--since-id') out.sinceId = argv[++i];
     else if (arg === '--help' || arg === '-h') {
@@ -141,8 +153,11 @@ Options:
   --vault PATH       Override OBSIDIAN_VAULT_DIR
   --output PATH      Vault-relative output directory
   --state PATH       Vault-relative state file
+  --appid ID         Only write screenshots from one Steam appid
+  --appids IDS       Only write screenshots from comma-separated Steam appids
   --pages N          Screenshot list pages to scan
   --limit N          Max new screenshots to process
+  --max-matches N    Stop after N matching screenshots are written or previewed
   --request-delay-ms Delay between screenshot detail requests, default 1200
   --since-id ID      Only process screenshots newer than this id in the current list
 `);
@@ -577,6 +592,13 @@ function parseCount(value) {
   if (value === 'all') return 'all';
   const number = Number(value);
   return Number.isFinite(number) && number > 0 ? number : 1;
+}
+
+function parseList(value) {
+  return String(value || '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
 }
 
 function parseNonNegativeInteger(value) {
