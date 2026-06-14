@@ -24,19 +24,6 @@ async function main() {
   const state = await readState(config.stateFile);
   const existingIds = await collectExistingScreenshotIds(config.outputDir);
   state.seenPublishedFileIds = unique([...state.seenPublishedFileIds, ...existingIds]);
-  const ids = await collectScreenshotIds(config.steamId, config.pages, config.limit);
-  const candidates = args.sinceId
-    ? ids.slice(0, Math.max(0, ids.indexOf(String(args.sinceId))))
-    : ids;
-  const sourceIds = config.resync
-    ? candidates
-    : candidates.filter((id) => !state.seenPublishedFileIds.includes(id));
-  const unseen = config.limit === 'all' ? sourceIds : sourceIds.slice(0, config.limit);
-
-  if (unseen.length === 0) {
-    console.log('No new public Steam screenshots found.');
-    return;
-  }
 
   const playtimeMap = config.steamApiKey
     ? await fetchOwnedGamePlaytimes(config.steamId, config.steamApiKey).catch((error) => {
@@ -47,32 +34,58 @@ async function main() {
 
   const coverMap = new Map();
   const processed = [];
+  const seenListIds = new Set();
+  const selectedAppids = new Set(config.appids);
+  const autoSelectGames = config.appids.length === 0 && config.maxGames !== 'all';
   let matchedCount = 0;
-  for (const [index, id] of unseen.reverse().entries()) {
-    if (index > 0 && config.requestDelayMs > 0) {
-      await sleep(config.requestDelayMs);
-    }
-    const item = await fetchScreenshotDetail(id);
-    if (config.appids.length > 0 && !config.appids.includes(String(item.appid))) {
-      continue;
-    }
-    matchedCount += 1;
-    item.playtimeMinutes = playtimeMap.get(String(item.appid)) ?? null;
-    if (!coverMap.has(String(item.appid))) {
-      coverMap.set(String(item.appid), await fetchGameCover(item.appid).catch(() => null));
-    }
-    item.cover = coverMap.get(String(item.appid));
+  let scannedCount = 0;
 
-    if (config.dryRun) {
-      console.log(formatDryRun(item, config.outputDir));
-      if (config.maxMatches !== 'all' && matchedCount >= config.maxMatches) break;
-      continue;
-    }
+  screenshotPages:
+  for await (const ids of collectScreenshotIdPages(config)) {
+    for (const id of ids) {
+      if (seenListIds.has(id)) continue;
+      seenListIds.add(id);
 
-    const target = await upsertExperienceNote(config.outputDir, item);
-    processed.push(id);
-    console.log(`Wrote ${target}`);
-    if (config.maxMatches !== 'all' && matchedCount >= config.maxMatches) break;
+      if (args.sinceId && id === String(args.sinceId)) break screenshotPages;
+      if (!config.resync && state.seenPublishedFileIds.includes(id)) continue;
+      if (config.limit !== 'all' && scannedCount >= config.limit) break screenshotPages;
+
+      scannedCount += 1;
+      if (scannedCount > 1 && config.requestDelayMs > 0) {
+        await sleep(config.requestDelayMs);
+      }
+
+      const item = await fetchScreenshotDetail(id);
+      if (config.appids.length > 0 && !config.appids.includes(String(item.appid))) {
+        continue;
+      }
+      if (autoSelectGames && !selectedAppids.has(String(item.appid))) {
+        if (selectedAppids.size >= config.maxGames) continue;
+        selectedAppids.add(String(item.appid));
+      }
+
+      matchedCount += 1;
+      item.playtimeMinutes = playtimeMap.get(String(item.appid)) ?? null;
+      if (!coverMap.has(String(item.appid))) {
+        coverMap.set(String(item.appid), await fetchGameCover(item.appid).catch(() => null));
+      }
+      item.cover = coverMap.get(String(item.appid));
+
+      if (config.dryRun) {
+        console.log(formatDryRun(item, config.outputDir));
+      } else {
+        const target = await upsertExperienceNote(config.outputDir, item);
+        processed.push(id);
+        console.log(`Wrote ${target}`);
+      }
+
+      if (config.maxMatches !== 'all' && matchedCount >= config.maxMatches) break screenshotPages;
+    }
+  }
+
+  if (matchedCount === 0) {
+    console.log('No new public Steam screenshots found.');
+    return;
   }
 
   if (!config.dryRun && processed.length > 0) {
@@ -90,6 +103,7 @@ function readConfig(args) {
 
   const experienceDir = args.output || process.env.STEAM_EXPERIENCE_DIR || DEFAULT_EXPERIENCE_DIR;
   const statePath = args.state || process.env.STEAM_SYNC_STATE || DEFAULT_STATE_PATH;
+  const requestDelayMs = parseNonNegativeInteger(args.requestDelayMs || process.env.STEAM_REQUEST_DELAY_MS || DEFAULT_REQUEST_DELAY_MS);
 
   return {
     steamId,
@@ -100,7 +114,9 @@ function readConfig(args) {
     pages: parseCount(args.pages || process.env.STEAM_LOOKBACK_PAGES || 1),
     limit: parseCount(args.limit || process.env.STEAM_LIMIT || 20),
     maxMatches: parseCount(args.maxMatches || process.env.STEAM_MAX_MATCHES || 'all'),
-    requestDelayMs: parseNonNegativeInteger(args.requestDelayMs || process.env.STEAM_REQUEST_DELAY_MS || DEFAULT_REQUEST_DELAY_MS),
+    maxGames: parseCount(args.maxGames || process.env.STEAM_MAX_GAMES || 'all'),
+    requestDelayMs,
+    pageDelayMs: parseNonNegativeInteger(args.pageDelayMs || process.env.STEAM_PAGE_DELAY_MS || requestDelayMs),
     appids: parseList(args.appid || args.appids || process.env.STEAM_APPIDS || ''),
     resync: Boolean(args.resync),
     dryRun: Boolean(args.dryRun),
@@ -127,7 +143,9 @@ function parseArgs(argv) {
     else if (arg === '--pages') out.pages = argv[++i];
     else if (arg === '--limit') out.limit = argv[++i];
     else if (arg === '--max-matches') out.maxMatches = argv[++i];
+    else if (arg === '--max-games') out.maxGames = argv[++i];
     else if (arg === '--request-delay-ms') out.requestDelayMs = argv[++i];
+    else if (arg === '--page-delay-ms') out.pageDelayMs = argv[++i];
     else if (arg === '--since-id') out.sinceId = argv[++i];
     else if (arg === '--help' || arg === '-h') {
       printHelp();
@@ -158,21 +176,26 @@ Options:
   --pages N          Screenshot list pages to scan
   --limit N          Max new screenshots to process
   --max-matches N    Stop after N matching screenshots are written or previewed
+  --max-games N      Auto-select up to N games when --appid/--appids is not set
   --request-delay-ms Delay between screenshot detail requests, default 1200
+  --page-delay-ms    Delay between screenshot list page requests, default request delay
   --since-id ID      Only process screenshots newer than this id in the current list
 `);
 }
 
-async function collectScreenshotIds(steamId, pages, limit) {
-  const ids = [];
+async function* collectScreenshotIdPages(config) {
   const seen = new Set();
-  const allPages = pages === 'all';
-  const pageLimit = allPages ? 200 : pages;
-  const itemLimit = limit === 'all' ? Number.POSITIVE_INFINITY : limit;
+  const allPages = config.pages === 'all';
+  const pageLimit = allPages ? 200 : config.pages;
   for (let page = 1; page <= pageLimit; page += 1) {
-    const url = `https://steamcommunity.com/profiles/${steamId}${SCREENSHOT_LIST_PATH}?p=${page}&sort=newest&l=english`;
+    if (page > 1 && config.pageDelayMs > 0) {
+      await sleep(config.pageDelayMs);
+    }
+
+    const url = `https://steamcommunity.com/profiles/${config.steamId}${SCREENSHOT_LIST_PATH}?p=${page}&sort=newest&l=english`;
     const html = await fetchText(url);
     const matches = html.matchAll(/sharedfiles\/filedetails\/\?id=(\d+)|data-publishedfileid="(\d+)"/g);
+    const ids = [];
     let addedOnPage = 0;
     for (const match of matches) {
       const id = match[1] || match[2];
@@ -181,10 +204,9 @@ async function collectScreenshotIds(steamId, pages, limit) {
       ids.push(id);
       addedOnPage += 1;
     }
-    if (ids.length >= itemLimit) break;
+    yield ids;
     if (allPages && addedOnPage === 0) break;
   }
-  return ids;
 }
 
 async function fetchScreenshotDetail(id) {
