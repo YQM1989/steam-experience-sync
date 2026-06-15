@@ -11,6 +11,10 @@
     "dry-run": "node src/index.mjs --dry-run",
     "dry-run:all": "node src/index.mjs --all --dry-run",
     "sync:all": "node src/index.mjs --all",
+    "worker": "node src/index.mjs --worker",
+    "worker:dry-run": "node src/index.mjs --worker --dry-run",
+    "worker:stop": "node src/index.mjs --stop-worker",
+    "worker:resume": "node src/index.mjs --clear-worker-stop",
     "check": "node --check src/index.mjs"
   },
   "engines": {

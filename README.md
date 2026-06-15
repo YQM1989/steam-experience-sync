@@ -70,6 +70,35 @@ node src/index.mjs --all
 node src/index.mjs --all --request-delay-ms 8000
 ```
 
+## Worker 模式
+
+Worker 模式用于把历史同步拆成低频小批次。它不是常驻进程，每次运行只处理一小批截图，然后自动退出，适合手动执行、Windows 任务计划程序或 macOS launchd。
+
+```bash
+npm run worker:dry-run
+npm run worker
+npm run worker:stop
+npm run worker:resume
+```
+
+推荐配置：
+
+```env
+STEAM_WORKER_APPIDS=2758000,4181110,1091500
+STEAM_WORKER_BATCH_SIZE=5
+STEAM_WORKER_PAGES=3
+STEAM_REQUEST_DELAY_MS=30000
+STEAM_PAGE_DELAY_MS=60000
+STEAM_WORKER_COOLDOWN_ON_429_MS=28800000
+```
+
+- `npm run worker`：运行一轮，处理队列中当前 appid 的一小批截图，完成后退出。
+- `npm run worker:stop`：创建停止文件，后续 worker 启动后会立刻退出。
+- `npm run worker:resume`：删除停止文件，允许 worker 继续运行。
+- 遇到 `429 Too Many Requests` 时，worker 会记录冷却时间并退出。默认冷却 8 小时，下次启动时如果还在冷却期，会直接跳过。
+- 日志默认写入 `<your-vault>\.obsidian\steam-experience-sync\worker.log`。
+- 停止文件默认是 `<your-vault>\.obsidian\steam-experience-sync\stop-worker`。
+
 日期归档使用 Steam 截图详情页里的 `Posted` 时间。这个时间更准确地说是 Steam 公开截图的发布/上传时间，不一定等于本地截图文件的原始拍摄时间。当前脚本不会读取 Steam 客户端本地截图文件。
 
 全量回扫会访问较多 Steam 页面，建议保留默认请求间隔；如果遇到 `429 Too Many Requests`，脚本会等待后重试。多次触发时不要立刻反复运行，等 30-60 分钟后用更大的 `--request-delay-ms` 重跑。
