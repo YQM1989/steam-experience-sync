@@ -77,6 +77,7 @@ Worker 模式用于把历史同步拆成低频小批次。它不是常驻进程�
 ```bash
 npm run worker:dry-run
 npm run worker
+npm run worker:status
 npm run worker:stop
 npm run worker:resume
 ```
@@ -93,11 +94,13 @@ STEAM_WORKER_COOLDOWN_ON_429_MS=28800000
 ```
 
 - `npm run worker`：运行一轮，处理队列中当前 appid 的一小批截图，完成后退出。
+- `npm run worker:status`：查看当前队列、下一个 appid、每个 appid 的下一页、冷却和停止状态。
 - `npm run worker:stop`：创建停止文件，后续 worker 启动后会立刻退出。
 - `npm run worker:resume`：删除停止文件，允许 worker 继续运行。
 - 遇到 `429 Too Many Requests` 时，worker 会记录冷却时间并退出。默认冷却 8 小时，下次启动时如果还在冷却期，会直接跳过。
 - 日志默认写入 `<your-vault>\.obsidian\steam-experience-sync\worker.log`。
 - 停止文件默认是 `<your-vault>\.obsidian\steam-experience-sync\stop-worker`。
+- 如果某一轮输出写入 0 张，不一定是错误；通常表示当前 appid 的当前几页已经没有未录入截图，worker 会把页码和队列推进到下一轮。
 
 日期归档使用 Steam 截图详情页里的 `Posted` 时间。这个时间更准确地说是 Steam 公开截图的发布/上传时间，不一定等于本地截图文件的原始拍摄时间。当前脚本不会读取 Steam 客户端本地截图文件。
 

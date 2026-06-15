@@ -30,6 +30,10 @@ async function main() {
     await clearWorkerStop(config);
     return;
   }
+  if (args.workerStatus) {
+    await printWorkerStatus(config);
+    return;
+  }
   if (config.worker) {
     await runWorker(config, args);
     return;
@@ -155,6 +159,7 @@ async function runWorker(config, args) {
   const index = state.worker.nextAppidIndex % queue.length;
   const appid = String(queue[index]);
   const appState = state.worker.appids[appid] || { nextPage: 1, imported: 0 };
+  const pageEnd = (appState.nextPage || 1) + config.workerPages - 1;
   const workerConfig = {
     ...config,
     appids: [appid],
@@ -165,6 +170,8 @@ async function runWorker(config, args) {
     maxGames: 'all',
     resync: false,
   };
+
+  console.log(`Worker batch: appid ${appid}, pages ${workerConfig.startPage}-${pageEnd}, max ${workerConfig.maxMatches} screenshot(s).`);
 
   await writeWorkerLog(config, {
     level: 'info',
@@ -206,6 +213,8 @@ async function runWorker(config, args) {
       nextPage,
       stoppedByStopFile: summary.stoppedByStopFile,
     });
+    console.log(`Worker done: appid ${appid}, wrote ${summary.processed.length}, matched ${summary.matchedCount}, next page ${nextPage}.`);
+    console.log(`Next worker run will start with appid ${queue[state.worker.nextAppidIndex]}.`);
   } catch (error) {
     if (error.status === 429) {
       state.worker.cooldownUntil = new Date(Date.now() + config.workerCooldownOn429Ms).toISOString();
@@ -248,6 +257,27 @@ async function clearWorkerStop(config) {
   } catch (error) {
     if (error.code !== 'ENOENT') throw error;
     console.log(`Worker stop was not set: ${config.workerStopFile}`);
+  }
+}
+
+async function printWorkerStatus(config) {
+  const state = await readState(config.stateFile);
+  const worker = normalizeWorkerState(state.worker);
+  const queue = config.workerAppids.length > 0 ? config.workerAppids : config.appids;
+  const nextAppid = queue.length > 0 ? queue[worker.nextAppidIndex % queue.length] : '(not configured)';
+  const stopExists = fsSync.existsSync(config.workerStopFile);
+  const cooldownActive = worker.cooldownUntil ? Date.parse(worker.cooldownUntil) > Date.now() : false;
+
+  console.log('Worker status');
+  console.log(`  queue: ${queue.length > 0 ? queue.join(',') : '(empty)'}`);
+  console.log(`  next appid: ${nextAppid}`);
+  console.log(`  stop file: ${stopExists ? 'present' : 'absent'}`);
+  console.log(`  cooldown: ${cooldownActive ? worker.cooldownUntil : 'inactive'}`);
+  console.log(`  last run: ${worker.lastRunAt || '(never)'}`);
+  console.log(`  last error: ${worker.lastError ? worker.lastError.message : '(none)'}`);
+  for (const appid of queue) {
+    const item = worker.appids[String(appid)] || {};
+    console.log(`  appid ${appid}: nextPage=${item.nextPage || 1}, imported=${item.imported || 0}, lastMatched=${item.lastMatchedCount ?? '(none)'}`);
   }
 }
 
@@ -298,6 +328,7 @@ function parseArgs(argv) {
     else if (arg === '--worker') out.worker = true;
     else if (arg === '--stop-worker') out.stopWorker = true;
     else if (arg === '--clear-worker-stop') out.clearWorkerStop = true;
+    else if (arg === '--worker-status') out.workerStatus = true;
     else if (arg === '--all') {
       out.pages = 'all';
       out.limit = 'all';
@@ -344,6 +375,7 @@ Options:
   --worker           Run one low-frequency worker batch and exit
   --stop-worker      Create stop file so future worker runs exit immediately
   --clear-worker-stop Remove worker stop file
+  --worker-status    Print worker queue, page, cooldown, and stop status
   --all              Scan all public screenshot pages and write missing blocks
   --steam-id ID      Override STEAM_ID
   --api-key KEY      Override STEAM_API_KEY, avoid using this in shell history
