@@ -12,6 +12,7 @@
     "dry-run:all": "node src/index.mjs --all --dry-run",
     "sync:all": "node src/index.mjs --all",
     "worker": "node src/index.mjs --worker",
+    "worker:loop": "node src/index.mjs --worker-loop",
     "worker:dry-run": "node src/index.mjs --worker --dry-run",
     "worker:status": "node src/index.mjs --worker-status",
     "worker:stop": "node src/index.mjs --stop-worker",

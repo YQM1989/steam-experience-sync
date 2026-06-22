@@ -77,6 +77,7 @@ Worker 模式用于把历史同步拆成低频小批次。它不是常驻进程�
 ```bash
 npm run worker:dry-run
 npm run worker
+npm run worker:loop
 npm run worker:status
 npm run worker:stop
 npm run worker:resume
@@ -90,10 +91,12 @@ STEAM_WORKER_BATCH_SIZE=5
 STEAM_WORKER_PAGES=3
 STEAM_REQUEST_DELAY_MS=30000
 STEAM_PAGE_DELAY_MS=60000
+STEAM_WORKER_LOOP_DELAY_MS=10000
 STEAM_WORKER_COOLDOWN_ON_429_MS=28800000
 ```
 
 - `npm run worker`：运行一轮，处理队列中当前 appid 的一小批截图，完成后退出。
+- `npm run worker:loop`：持续运行多轮 worker；每轮结束后等待 `STEAM_WORKER_LOOP_DELAY_MS`，默认 10 秒，直到遇到停止文件、冷却或错误。
 - `npm run worker:status`：查看当前队列、下一个 appid、每个 appid 的下一页、冷却和停止状态。
 - `npm run worker:stop`：创建停止文件，后续 worker 启动后会立刻退出。
 - `npm run worker:resume`：删除停止文件，允许 worker 继续运行。

@@ -10,6 +10,7 @@ const DEFAULT_STATE_PATH = '.obsidian/steam-experience-sync/state.json';
 const DEFAULT_REQUEST_DELAY_MS = 1200;
 const DEFAULT_RETRY_AFTER_MS = 60000;
 const DEFAULT_WORKER_COOLDOWN_ON_429_MS = 8 * 60 * 60 * 1000;
+const DEFAULT_WORKER_LOOP_DELAY_MS = 10000;
 const SCREENSHOT_LIST_PATH = '/screenshots/';
 
 main().catch((error) => {
@@ -32,6 +33,10 @@ async function main() {
   }
   if (args.workerStatus) {
     await printWorkerStatus(config);
+    return;
+  }
+  if (config.workerLoop) {
+    await runWorkerLoop(config, args);
     return;
   }
   if (config.worker) {
@@ -244,6 +249,34 @@ async function runWorker(config, args) {
   }
 }
 
+async function runWorkerLoop(config, args) {
+  console.log(`Worker loop started. Delay between rounds: ${Math.round(config.workerLoopDelayMs / 1000)}s.`);
+  console.log('Use `npm.cmd run worker:stop` in another terminal to stop after the current step.');
+
+  while (true) {
+    await runWorker({ ...config, worker: true }, args);
+
+    if (config.dryRun) {
+      console.log('Worker loop dry-run stops after one round.');
+      return;
+    }
+    if (fsSync.existsSync(config.workerStopFile)) {
+      console.log(`Worker loop stopped by ${config.workerStopFile}`);
+      return;
+    }
+
+    const state = await readState(config.stateFile);
+    const worker = normalizeWorkerState(state.worker);
+    if (worker.cooldownUntil && Date.parse(worker.cooldownUntil) > Date.now()) {
+      console.log(`Worker loop paused by cooldown until ${worker.cooldownUntil}`);
+      return;
+    }
+
+    console.log(`Worker loop waiting ${Math.round(config.workerLoopDelayMs / 1000)}s before next round...`);
+    await sleep(config.workerLoopDelayMs);
+  }
+}
+
 async function requestWorkerStop(config) {
   await fs.mkdir(path.dirname(config.workerStopFile), { recursive: true });
   await fs.writeFile(config.workerStopFile, new Date().toISOString() + '\n', 'utf8');
@@ -308,10 +341,12 @@ function readConfig(args) {
     pageDelayMs: parseNonNegativeInteger(args.pageDelayMs || process.env.STEAM_PAGE_DELAY_MS || requestDelayMs),
     appids: parseList(args.appid || args.appids || process.env.STEAM_APPIDS || ''),
     worker: Boolean(args.worker),
+    workerLoop: Boolean(args.workerLoop),
     workerAppids: parseList(args.workerAppids || process.env.STEAM_WORKER_APPIDS || process.env.STEAM_SYNC_APPIDS || ''),
     workerBatchSize: parseCount(args.workerBatchSize || process.env.STEAM_WORKER_BATCH_SIZE || 5),
     workerPages: parseCount(args.workerPages || process.env.STEAM_WORKER_PAGES || 3),
     workerCooldownOn429Ms: parseNonNegativeInteger(args.workerCooldownOn429Ms || process.env.STEAM_WORKER_COOLDOWN_ON_429_MS || DEFAULT_WORKER_COOLDOWN_ON_429_MS),
+    workerLoopDelayMs: parseNonNegativeInteger(args.workerLoopDelayMs || process.env.STEAM_WORKER_LOOP_DELAY_MS || DEFAULT_WORKER_LOOP_DELAY_MS),
     workerLogFile: path.resolve(vaultDir, fromVaultPath(workerLogPath)),
     workerStopFile: path.resolve(vaultDir, fromVaultPath(workerStopPath)),
     resync: Boolean(args.resync),
@@ -326,6 +361,7 @@ function parseArgs(argv) {
     if (arg === '--dry-run') out.dryRun = true;
     else if (arg === '--resync') out.resync = true;
     else if (arg === '--worker') out.worker = true;
+    else if (arg === '--worker-loop') out.workerLoop = true;
     else if (arg === '--stop-worker') out.stopWorker = true;
     else if (arg === '--clear-worker-stop') out.clearWorkerStop = true;
     else if (arg === '--worker-status') out.workerStatus = true;
@@ -349,6 +385,7 @@ function parseArgs(argv) {
     else if (arg === '--worker-batch-size') out.workerBatchSize = argv[++i];
     else if (arg === '--worker-pages') out.workerPages = argv[++i];
     else if (arg === '--worker-cooldown-on-429-ms') out.workerCooldownOn429Ms = argv[++i];
+    else if (arg === '--worker-loop-delay-ms') out.workerLoopDelayMs = argv[++i];
     else if (arg === '--worker-log') out.workerLog = argv[++i];
     else if (arg === '--worker-stop-file') out.workerStop = argv[++i];
     else if (arg === '--request-delay-ms') out.requestDelayMs = argv[++i];
@@ -373,6 +410,7 @@ Options:
   --dry-run          Preview writes without changing files
   --resync           Re-scan selected pages and write missing blocks even if state has seen them
   --worker           Run one low-frequency worker batch and exit
+  --worker-loop      Keep running worker batches until stop file, cooldown, or error
   --stop-worker      Create stop file so future worker runs exit immediately
   --clear-worker-stop Remove worker stop file
   --worker-status    Print worker queue, page, cooldown, and stop status
@@ -393,6 +431,7 @@ Options:
   --worker-batch-size N Stop a worker run after N matching screenshots, default 5
   --worker-pages N   Screenshot list pages per worker run, default 3
   --worker-cooldown-on-429-ms N Cooldown after 429, default 8 hours
+  --worker-loop-delay-ms N Delay between worker loop rounds, default 10s
   --worker-log PATH  Vault-relative worker log path
   --worker-stop-file PATH Vault-relative worker stop file
   --request-delay-ms Delay between screenshot detail requests, default 1200
