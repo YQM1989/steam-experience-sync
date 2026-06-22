@@ -8,6 +8,7 @@
   },
   "scripts": {
     "start": "node src/index.mjs",
+    "gui": "node src/gui.mjs",
     "dry-run": "node src/index.mjs --dry-run",
     "dry-run:all": "node src/index.mjs --all --dry-run",
     "sync:all": "node src/index.mjs --all",

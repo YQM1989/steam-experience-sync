@@ -56,6 +56,27 @@ node src/index.mjs --dry-run
 node src/index.mjs
 ```
 
+## GUI 控制面板
+
+如果不想每次敲命令，可以启动本地 GUI：
+
+```bash
+npm run gui
+```
+
+然后在浏览器打开：
+
+```text
+http://127.0.0.1:8765
+```
+
+GUI 提供两种运行模式：
+
+- 运行一轮：等同于 `npm run worker`，处理一小批后退出。
+- 连续运行：等同于 `npm run worker:loop`，每轮结束后按 `STEAM_WORKER_LOOP_DELAY_MS` 等待，默认 10 秒，然后继续下一轮。
+
+GUI 也可以停止、恢复、查看队列进度和 worker 日志。它只绑定本机 `127.0.0.1`，不提供外网访问。
+
 常用参数：
 
 ```bash
