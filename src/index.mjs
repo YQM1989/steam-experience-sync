@@ -152,7 +152,7 @@ async function runWorker(config, args) {
       event: 'cooldown_skip',
       cooldownUntil: state.worker.cooldownUntil,
     });
-    console.log(`Worker skipped: cooldown until ${state.worker.cooldownUntil}`);
+    console.log(`Worker skipped: cooldown until ${formatBeijingDateTime(state.worker.cooldownUntil)}`);
     return;
   }
 
@@ -242,7 +242,7 @@ async function runWorker(config, args) {
     });
 
     if (error.status === 429) {
-      console.warn(`Worker stopped on 429; cooldown until ${state.worker.cooldownUntil}`);
+      console.warn(`Worker stopped on 429; cooldown until ${formatBeijingDateTime(state.worker.cooldownUntil)}`);
       return;
     }
     throw error;
@@ -268,7 +268,7 @@ async function runWorkerLoop(config, args) {
     const state = await readState(config.stateFile);
     const worker = normalizeWorkerState(state.worker);
     if (worker.cooldownUntil && Date.parse(worker.cooldownUntil) > Date.now()) {
-      console.log(`Worker loop paused by cooldown until ${worker.cooldownUntil}`);
+      console.log(`Worker loop paused by cooldown until ${formatBeijingDateTime(worker.cooldownUntil)}`);
       return;
     }
 
@@ -305,8 +305,9 @@ async function printWorkerStatus(config) {
   console.log(`  queue: ${queue.length > 0 ? queue.join(',') : '(empty)'}`);
   console.log(`  next appid: ${nextAppid}`);
   console.log(`  stop file: ${stopExists ? 'present' : 'absent'}`);
-  console.log(`  cooldown: ${cooldownActive ? worker.cooldownUntil : 'inactive'}`);
-  console.log(`  last run: ${worker.lastRunAt || '(never)'}`);
+  console.log(`  timezone: 北京时间`);
+  console.log(`  cooldown: ${cooldownActive ? formatBeijingDateTime(worker.cooldownUntil) : 'inactive'}`);
+  console.log(`  last run: ${worker.lastRunAt ? formatBeijingDateTime(worker.lastRunAt) : '(never)'}`);
   console.log(`  last error: ${worker.lastError ? worker.lastError.message : '(none)'}`);
   for (const appid of queue) {
     const item = worker.appids[String(appid)] || {};
@@ -932,6 +933,24 @@ function formatDate(date) {
 
 function formatTime(date) {
   return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+}
+
+function formatBeijingDateTime(value) {
+  if (!value) return '';
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  const parts = new Intl.DateTimeFormat('zh-CN', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  }).formatToParts(date);
+  const pick = (type) => parts.find((part) => part.type === type)?.value || '';
+  return `${pick('year')}-${pick('month')}-${pick('day')} ${pick('hour')}:${pick('minute')}:${pick('second')} 北京时间`;
 }
 
 function yamlString(value) {

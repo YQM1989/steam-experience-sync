@@ -125,13 +125,16 @@ async function readStatus() {
       pid: activeProcess.pid,
       mode: activeProcess.mode,
       startedAt: activeProcess.startedAt,
+      startedAtBeijing: formatBeijingDateTime(activeProcess.startedAt),
     } : null,
     queue,
     nextAppid,
     stopFilePresent: stopFile ? fsSync.existsSync(stopFile) : false,
     cooldownActive,
     cooldownUntil: cooldownActive ? worker.cooldownUntil : null,
+    cooldownUntilBeijing: cooldownActive ? formatBeijingDateTime(worker.cooldownUntil) : null,
     lastRunAt: worker.lastRunAt || null,
+    lastRunAtBeijing: worker.lastRunAt ? formatBeijingDateTime(worker.lastRunAt) : null,
     lastError: worker.lastError || null,
     appids: queue.map((appid) => ({
       appid,
@@ -146,6 +149,7 @@ async function readStatus() {
       requestDelayMs: env.STEAM_REQUEST_DELAY_MS || '',
       pageDelayMs: env.STEAM_PAGE_DELAY_MS || '',
       loopDelayMs: env.STEAM_WORKER_LOOP_DELAY_MS || '10000',
+      timezone: '北京时间',
       vaultDir,
     },
   };
@@ -153,7 +157,7 @@ async function readStatus() {
 
 async function readLogs() {
   const fileLog = workerLogFile && fsSync.existsSync(workerLogFile)
-    ? tailLines(await fs.readFile(workerLogFile, 'utf8'), 120)
+    ? tailLines(await fs.readFile(workerLogFile, 'utf8'), 120).map(formatWorkerLogLine)
     : [];
   return {
     ok: true,
@@ -260,13 +264,14 @@ async function refresh() {
   el('runLoop').disabled = running;
   const stateBadge = running ? badge('运行中 PID ' + status.process.pid, 'ok') : badge('空闲', 'warn');
   const stopBadge = status.stopFilePresent ? badge('已暂停', 'danger') : badge('可运行', 'ok');
-  const cooldown = status.cooldownActive ? status.cooldownUntil : '无';
+  const cooldown = status.cooldownActive ? status.cooldownUntilBeijing : '无';
   el('statusKv').innerHTML = [
     ['运行状态', stateBadge],
     ['停止开关', stopBadge],
     ['下一 AppID', status.nextAppid || '未配置'],
+    ['时区', status.config.timezone],
     ['冷却', cooldown],
-    ['上次运行', status.lastRunAt || '无'],
+    ['上次运行', status.lastRunAtBeijing || '无'],
     ['每轮截图', status.config.workerBatchSize],
     ['每轮页数', status.config.workerPages],
     ['轮间隔', status.config.loopDelayMs + ' ms']
@@ -312,9 +317,54 @@ async function readJsonFile(file) {
 
 function pushOutput(text) {
   for (const line of String(text).split(/\r?\n/)) {
-    if (line.trim()) outputLines.push(`[${new Date().toLocaleTimeString()}] ${line}`);
+    if (line.trim()) outputLines.push(`[${formatBeijingTime(new Date())}] ${line}`);
   }
   while (outputLines.length > 300) outputLines.shift();
+}
+
+function formatWorkerLogLine(line) {
+  try {
+    const entry = JSON.parse(line);
+    const at = formatBeijingDateTime(entry.at);
+    const details = Object.entries(entry)
+      .filter(([key]) => key !== 'at')
+      .map(([key, value]) => `${key}=${value}`)
+      .join(' ');
+    return `[${at}] ${details}`;
+  } catch {
+    return line;
+  }
+}
+
+function formatBeijingTime(value) {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value || '');
+  const parts = new Intl.DateTimeFormat('zh-CN', {
+    timeZone: 'Asia/Shanghai',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  }).formatToParts(date);
+  const pick = (type) => parts.find((part) => part.type === type)?.value || '';
+  return `${pick('hour')}:${pick('minute')}:${pick('second')} 北京时间`;
+}
+
+function formatBeijingDateTime(value) {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value || '');
+  const parts = new Intl.DateTimeFormat('zh-CN', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  }).formatToParts(date);
+  const pick = (type) => parts.find((part) => part.type === type)?.value || '';
+  return `${pick('year')}-${pick('month')}-${pick('day')} ${pick('hour')}:${pick('minute')}:${pick('second')} 北京时间`;
 }
 
 function normalizeWorkerState(value) {
