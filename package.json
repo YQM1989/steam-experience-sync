@@ -1,4 +1,4 @@
-﻿{
+{
   "name": "steam-experience-sync",
   "version": "0.1.0",
   "type": "module",
@@ -18,10 +18,35 @@
     "worker:status": "node src/index.mjs --worker-status",
     "worker:stop": "node src/index.mjs --stop-worker",
     "worker:resume": "node src/index.mjs --clear-worker-stop",
-    "check": "node --check src/index.mjs"
+    "ui:dev": "vite",
+    "ui:build": "vite build",
+    "ui:preview": "vite preview",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build",
+    "test": "node --test tests/**/*.test.mjs",
+    "test:ui": "vitest run",
+    "check": "node --check src/index.mjs && node --check src/gui.mjs && npm run ui:build"
   },
   "engines": {
     "node": ">=18"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "dependencies": {
+    "@tauri-apps/api": "^2.11.1",
+    "@tauri-apps/plugin-notification": "^2.3.3",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.11.3",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.3",
+    "jsdom": "^29.1.1",
+    "typescript": "^6.0.3",
+    "vite": "^8.1.0",
+    "vitest": "^4.1.9"
+  }
 }
