@@ -8,5 +8,9 @@ export default defineConfig({
     port: 1420,
     strictPort: true,
   },
+  test: {
+    environment: 'jsdom',
+    include: ['src-ui/**/*.test.tsx'],
+  },
   clearScreen: false,
 });

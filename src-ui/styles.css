@@ -44,3 +44,51 @@ h1 {
 .muted {
   color: #b8b3ad;
 }
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 18px 0 22px;
+}
+
+button {
+  min-height: 38px;
+  border: 1px solid #3c3c3c;
+  border-radius: 6px;
+  padding: 0 14px;
+  color: #e7e1d8;
+  background: #2a2a2a;
+  font: inherit;
+  cursor: pointer;
+}
+
+button:hover {
+  border-color: #5a5a5a;
+  background: #323232;
+}
+
+button:disabled {
+  cursor: wait;
+  opacity: 0.58;
+}
+
+h2 {
+  margin: 20px 0 8px;
+  font-size: 15px;
+  letter-spacing: 0;
+}
+
+pre {
+  min-height: 120px;
+  max-height: 260px;
+  overflow: auto;
+  margin: 0;
+  border: 1px solid #333;
+  border-radius: 6px;
+  padding: 12px;
+  color: #d2cec8;
+  background: #111;
+  font: 13px Consolas, "SFMono-Regular", monospace;
+  white-space: pre-wrap;
+}
