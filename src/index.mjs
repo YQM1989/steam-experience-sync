@@ -4,9 +4,11 @@ import fsSync from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import process from 'node:process';
+import { readDiscoveryIndex, upsertDiscoveredScreenshot, writeDiscoveryIndex } from './core/discovery-store.mjs';
 
 const DEFAULT_EXPERIENCE_DIR = '00_输入源/50_我是谁/Steam体验记录';
 const DEFAULT_STATE_PATH = '.obsidian/steam-experience-sync/state.json';
+const DEFAULT_DISCOVERY_PATH = '.obsidian/steam-experience-sync/discovered-games.json';
 const DEFAULT_REQUEST_DELAY_MS = 1200;
 const DEFAULT_RETRY_AFTER_MS = 60000;
 const DEFAULT_WORKER_COOLDOWN_ON_429_MS = 8 * 60 * 60 * 1000;
@@ -35,6 +37,10 @@ async function main() {
     await printWorkerStatus(config);
     return;
   }
+  if (args.discover) {
+    await runDiscovery(config, args);
+    return;
+  }
   if (config.workerLoop) {
     await runWorkerLoop(config, args);
     return;
@@ -46,6 +52,42 @@ async function main() {
 
   const state = await readState(config.stateFile);
   await runOnce(config, args, state);
+}
+
+async function runDiscovery(config, args) {
+  const index = await readDiscoveryIndex(config.discoveryFile);
+  const seenListIds = new Set();
+  let discoveredScreenshots = 0;
+  let scannedCount = 0;
+  let lastScannedPage = config.startPage - 1;
+
+  screenshotPages:
+  for await (const pageResult of collectScreenshotIdPages(config)) {
+    lastScannedPage = pageResult.page;
+    for (const id of pageResult.ids) {
+      if (seenListIds.has(id)) continue;
+      seenListIds.add(id);
+      if (args.sinceId && id === String(args.sinceId)) break screenshotPages;
+      if (config.limit !== 'all' && scannedCount >= config.limit) break screenshotPages;
+
+      scannedCount += 1;
+      if (scannedCount > 1 && config.requestDelayMs > 0) {
+        await sleep(config.requestDelayMs);
+      }
+
+      const item = await fetchScreenshotDetail(id);
+      upsertDiscoveredScreenshot(index, item);
+      discoveredScreenshots += 1;
+      console.log(`Discovered ${item.game} (${item.appid}) screenshot ${item.id}`);
+    }
+  }
+
+  if (!config.dryRun) {
+    await writeDiscoveryIndex(config.discoveryFile, index);
+  }
+
+  const gameCount = Object.keys(index.games || {}).length;
+  console.log(`Discovered ${gameCount} game(s), ${discoveredScreenshots} screenshot(s), last page ${lastScannedPage}.`);
 }
 
 async function runOnce(config, args, state) {
@@ -323,6 +365,7 @@ function readConfig(args) {
 
   const experienceDir = args.output || process.env.STEAM_EXPERIENCE_DIR || DEFAULT_EXPERIENCE_DIR;
   const statePath = args.state || process.env.STEAM_SYNC_STATE || DEFAULT_STATE_PATH;
+  const discoveryPath = args.discoveryFile || process.env.STEAM_DISCOVERY_FILE || DEFAULT_DISCOVERY_PATH;
   const requestDelayMs = parseNonNegativeInteger(args.requestDelayMs || process.env.STEAM_REQUEST_DELAY_MS || DEFAULT_REQUEST_DELAY_MS);
   const workerLogPath = args.workerLog || process.env.STEAM_WORKER_LOG || '.obsidian/steam-experience-sync/worker.log';
   const workerStopPath = args.workerStop || process.env.STEAM_WORKER_STOP_FILE || '.obsidian/steam-experience-sync/stop-worker';
@@ -333,6 +376,7 @@ function readConfig(args) {
     steamApiKey: args.apiKey || process.env.STEAM_API_KEY || '',
     outputDir: path.resolve(vaultDir, fromVaultPath(experienceDir)),
     stateFile: path.resolve(vaultDir, fromVaultPath(statePath)),
+    discoveryFile: path.resolve(vaultDir, fromVaultPath(discoveryPath)),
     pages: parseCount(args.pages || process.env.STEAM_LOOKBACK_PAGES || 1),
     startPage: parseCount(args.startPage || process.env.STEAM_START_PAGE || 1),
     limit: parseCount(args.limit || process.env.STEAM_LIMIT || 20),
@@ -366,6 +410,7 @@ function parseArgs(argv) {
     else if (arg === '--stop-worker') out.stopWorker = true;
     else if (arg === '--clear-worker-stop') out.clearWorkerStop = true;
     else if (arg === '--worker-status') out.workerStatus = true;
+    else if (arg === '--discover') out.discover = true;
     else if (arg === '--all') {
       out.pages = 'all';
       out.limit = 'all';
@@ -375,6 +420,7 @@ function parseArgs(argv) {
     else if (arg === '--vault') out.vault = argv[++i];
     else if (arg === '--output') out.output = argv[++i];
     else if (arg === '--state') out.state = argv[++i];
+    else if (arg === '--discovery-file') out.discoveryFile = argv[++i];
     else if (arg === '--appid') out.appid = argv[++i];
     else if (arg === '--appids') out.appids = argv[++i];
     else if (arg === '--worker-appids') out.workerAppids = argv[++i];
@@ -413,14 +459,16 @@ Options:
   --worker           Run one low-frequency worker batch and exit
   --worker-loop      Keep running worker batches until stop file, cooldown, or error
   --stop-worker      Create stop file so future worker runs exit immediately
-  --clear-worker-stop Remove worker stop file
-  --worker-status    Print worker queue, page, cooldown, and stop status
-  --all              Scan all public screenshot pages and write missing blocks
+    --clear-worker-stop Remove worker stop file
+    --worker-status    Print worker queue, page, cooldown, and stop status
+    --discover         Scan public screenshots and update discovered-games index only
+    --all              Scan all public screenshot pages and write missing blocks
   --steam-id ID      Override STEAM_ID
   --api-key KEY      Override STEAM_API_KEY, avoid using this in shell history
   --vault PATH       Override OBSIDIAN_VAULT_DIR
-  --output PATH      Vault-relative output directory
-  --state PATH       Vault-relative state file
+    --output PATH      Vault-relative output directory
+    --state PATH       Vault-relative state file
+    --discovery-file PATH Vault-relative discovered games index
   --appid ID         Only write screenshots from one Steam appid
   --appids IDS       Only write screenshots from comma-separated Steam appids
   --worker-appids IDS Appid queue for worker mode
