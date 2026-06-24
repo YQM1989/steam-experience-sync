@@ -1,5 +1,6 @@
 ﻿# local secrets
 .env
+.steam-experience-sync/
 
 # runtime state if user chooses project-local state
 .state/

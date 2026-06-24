@@ -1,4 +1,5 @@
 use serde::Serialize;
+use std::io::Write;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
@@ -80,4 +81,43 @@ pub fn start_worker_loop() -> Result<CommandResult, String> {
 pub fn stop_worker() -> Result<CommandResult, String> {
     let message = run_node(&["src/index.mjs", "--stop-worker"])?;
     Ok(CommandResult { ok: true, message })
+}
+
+#[tauri::command]
+pub fn read_config() -> Result<String, String> {
+    run_node(&[
+        "-e",
+        "import('./src/core/config-store.mjs').then(async m => console.log(JSON.stringify(await m.readGuiConfig(process.cwd())))).catch(error => { console.error(error.message); process.exit(1); })",
+    ])
+}
+
+#[tauri::command]
+pub fn write_config(payload: String) -> Result<CommandResult, String> {
+    let root = project_root()?;
+    let script = "let raw=''; process.stdin.on('data', chunk => raw += chunk); process.stdin.on('end', () => import('./src/core/config-store.mjs').then(async m => { const result = await m.writeGuiConfig(process.cwd(), JSON.parse(raw || '{}')); console.log(JSON.stringify(result)); }).catch(error => { console.error(error.message); process.exit(1); }));";
+    let mut child = Command::new("node")
+        .arg("-e")
+        .arg(script)
+        .current_dir(root)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| error.to_string())?;
+
+    if let Some(stdin) = child.stdin.as_mut() {
+        stdin
+            .write_all(payload.as_bytes())
+            .map_err(|error| error.to_string())?;
+    }
+
+    let output = child.wait_with_output().map_err(|error| error.to_string())?;
+    if output.status.success() {
+        Ok(CommandResult {
+            ok: true,
+            message: String::from_utf8_lossy(&output.stdout).to_string(),
+        })
+    } else {
+        Err(String::from_utf8_lossy(&output.stderr).to_string())
+    }
 }

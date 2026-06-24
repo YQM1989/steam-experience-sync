@@ -7,8 +7,10 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::get_status,
             commands::get_logs,
+            commands::read_config,
             commands::start_worker_loop,
-            commands::stop_worker
+            commands::stop_worker,
+            commands::write_config
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
