@@ -7,6 +7,10 @@ import http from 'node:http';
 import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
+import { loadDotEnvFile } from './core/dotenv.mjs';
+import { readWorkerLog } from './core/logs.mjs';
+import { resolveRuntimePaths } from './core/paths.mjs';
+import { readRuntimeStatus } from './core/status.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, '..');
@@ -16,17 +20,9 @@ const port = Number(process.env.STEAM_GUI_PORT || 8765);
 const outputLines = [];
 let activeProcess = null;
 
-const env = loadDotEnv(path.join(projectRoot, '.env'));
-const vaultDir = env.OBSIDIAN_VAULT_DIR || '';
-const stateFile = vaultDir
-  ? path.resolve(vaultDir, fromVaultPath(env.STEAM_SYNC_STATE || '.obsidian/steam-experience-sync/state.json'))
-  : '';
-const workerLogFile = vaultDir
-  ? path.resolve(vaultDir, fromVaultPath(env.STEAM_WORKER_LOG || '.obsidian/steam-experience-sync/worker.log'))
-  : '';
-const stopFile = vaultDir
-  ? path.resolve(vaultDir, fromVaultPath(env.STEAM_WORKER_STOP_FILE || '.obsidian/steam-experience-sync/stop-worker'))
-  : '';
+const env = await loadDotEnvFile(path.join(projectRoot, '.env'));
+const runtimePaths = resolveRuntimePaths(projectRoot, env);
+const { vaultDir, stateFile, stopFile } = runtimePaths;
 
 const server = http.createServer(async (request, response) => {
   try {
@@ -115,6 +111,7 @@ async function runControlCommand(flag) {
 
 async function readStatus() {
   const state = await readJsonFile(stateFile);
+  const runtimeStatus = await readRuntimeStatus(runtimePaths);
   const worker = normalizeWorkerState(state?.worker);
   const queue = parseList(env.STEAM_WORKER_APPIDS || env.STEAM_SYNC_APPIDS || env.STEAM_APPIDS || '');
   const nextAppid = queue.length > 0 ? queue[worker.nextAppidIndex % queue.length] : '';
@@ -129,7 +126,7 @@ async function readStatus() {
     } : null,
     queue,
     nextAppid,
-    stopFilePresent: stopFile ? fsSync.existsSync(stopFile) : false,
+    stopFilePresent: runtimeStatus.stopRequested,
     cooldownActive,
     cooldownUntil: cooldownActive ? worker.cooldownUntil : null,
     cooldownUntilBeijing: cooldownActive ? formatBeijingDateTime(worker.cooldownUntil) : null,
@@ -156,9 +153,7 @@ async function readStatus() {
 }
 
 async function readLogs() {
-  const fileLog = workerLogFile && fsSync.existsSync(workerLogFile)
-    ? tailLines(await fs.readFile(workerLogFile, 'utf8'), 120).map(formatWorkerLogLine)
-    : [];
+  const fileLog = (await readWorkerLog(runtimePaths, 120)).map(formatWorkerLogLine);
   return {
     ok: true,
     runtime: outputLines.slice(-160),
@@ -377,30 +372,6 @@ function normalizeWorkerState(value) {
   };
 }
 
-function loadDotEnv(file) {
-  const result = {};
-  if (!fsSync.existsSync(file)) return result;
-  const raw = fsSync.readFileSync(file, 'utf8');
-  for (const line of raw.split(/\r?\n/)) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith('#')) continue;
-    const index = trimmed.indexOf('=');
-    if (index <= 0) continue;
-    let value = trimmed.slice(index + 1).trim();
-    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) value = value.slice(1, -1);
-    result[trimmed.slice(0, index).trim()] = value;
-  }
-  return result;
-}
-
 function parseList(value) {
   return String(value || '').split(',').map((item) => item.trim()).filter(Boolean);
-}
-
-function fromVaultPath(value) {
-  return String(value).replace(/[\\/]+/g, path.sep);
-}
-
-function tailLines(text, count) {
-  return String(text || '').trim().split(/\r?\n/).filter(Boolean).slice(-count);
 }
