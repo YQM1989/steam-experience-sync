@@ -45,6 +45,10 @@ async function main() {
     await runDiscovery(config, args);
     return;
   }
+  if (args.readDiscovery) {
+    await printDiscoveryIndex(config);
+    return;
+  }
   if (args.readPending) {
     await printPendingWrites(config);
     return;
@@ -209,6 +213,11 @@ async function runDiscovery(config, args) {
 
   const gameCount = Object.keys(index.games || {}).length;
   console.log(`Discovered ${gameCount} game(s), ${discoveredScreenshots} screenshot(s), last page ${lastScannedPage}.`);
+}
+
+async function printDiscoveryIndex(config) {
+  const index = await readDiscoveryIndex(config.discoveryFile);
+  console.log(JSON.stringify(index, null, 2));
 }
 
 async function runOnce(config, args, state) {
@@ -557,6 +566,7 @@ function parseArgs(argv) {
     else if (arg === '--clear-worker-stop') out.clearWorkerStop = true;
     else if (arg === '--worker-status') out.workerStatus = true;
     else if (arg === '--discover') out.discover = true;
+    else if (arg === '--read-discovery') out.readDiscovery = true;
     else if (arg === '--read-pending') out.readPending = true;
     else if (arg === '--plan-writes') out.planWrites = true;
     else if (arg === '--apply-pending') out.applyPending = true;
@@ -613,6 +623,7 @@ Options:
     --clear-worker-stop Remove worker stop file
   --worker-status    Print worker queue, page, cooldown, and stop status
   --discover         Scan public screenshots and update discovered-games index only
+  --read-discovery   Print discovered games index as JSON
   --read-pending     Print pending write queue as JSON
   --plan-writes      Scan screenshots and save pending writes without changing notes
   --apply-pending    Write pending screenshots to notes and clear pending queue

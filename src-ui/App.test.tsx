@@ -12,6 +12,7 @@ vi.mock('./tauriApi', () => ({
   getLogs: vi.fn().mockResolvedValue(''),
   getStatus: vi.fn().mockResolvedValue('ready'),
   planWrites: vi.fn().mockResolvedValue({ ok: true, message: 'planned' }),
+  readDiscoveryIndex: vi.fn().mockResolvedValue({ games: {} }),
   readConfig: vi.fn().mockResolvedValue({
     steamId: '',
     steamApiKey: '',
@@ -28,9 +29,14 @@ vi.mock('./tauriApi', () => ({
 }));
 
 describe('App', () => {
-  it('renders worker control buttons', () => {
+  it('renders navigation tabs and worker control buttons', () => {
     render(<App />);
 
+    expect(screen.getByRole('button', { name: 'Dashboard' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Queue' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Preview' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Logs' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Settings' })).toBeTruthy();
     expect(screen.getByRole('button', { name: '连续运行' })).toBeTruthy();
     expect(screen.getByRole('button', { name: '停止' })).toBeTruthy();
     expect(screen.getByRole('button', { name: '刷新状态' })).toBeTruthy();

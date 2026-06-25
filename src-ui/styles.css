@@ -33,6 +33,24 @@ body {
   margin-top: 18px;
 }
 
+.tabbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  max-width: 960px;
+  margin: 0 0 18px;
+}
+
+.tabbar button {
+  color: #b8b3ad;
+}
+
+.tabbar button.active {
+  border-color: #7867d8;
+  color: #f0ecff;
+  background: #302a52;
+}
+
 .eyebrow {
   margin: 0 0 8px;
   color: #9f8fff;
@@ -218,6 +236,41 @@ select {
   overflow-wrap: anywhere;
 }
 
+.queue-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.queue-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 18px;
+  align-items: center;
+  border: 1px solid #343434;
+  border-radius: 8px;
+  padding: 14px;
+  background: #181818;
+}
+
+.queue-item h3 {
+  margin: 0 0 4px;
+  font-size: 16px;
+  letter-spacing: 0;
+}
+
+.queue-item p {
+  margin: 0;
+}
+
+.queue-meta {
+  display: grid;
+  justify-items: end;
+  gap: 4px;
+  color: #b8b3ad;
+  font-size: 13px;
+}
+
 @media (max-width: 720px) {
   body {
     min-width: 0;
@@ -229,5 +282,13 @@ select {
 
   .preview-item {
     grid-template-columns: 1fr;
+  }
+
+  .queue-item {
+    grid-template-columns: 1fr;
+  }
+
+  .queue-meta {
+    justify-items: start;
   }
 }

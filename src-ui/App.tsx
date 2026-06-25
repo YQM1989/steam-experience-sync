@@ -1,10 +1,24 @@
 import { useEffect, useState } from 'react';
+import { Dashboard } from './Dashboard';
+import { Logs } from './Logs';
 import { notifyPausedByRateLimit } from './notifications';
 import { Preview } from './Preview';
+import { Queue } from './Queue';
 import { Settings } from './Settings';
 import { getLogs, getStatus, startWorkerLoop, stopWorker } from './tauriApi';
 
+type Tab = 'dashboard' | 'queue' | 'preview' | 'logs' | 'settings';
+
+const tabs: Array<{ id: Tab; label: string }> = [
+  { id: 'dashboard', label: 'Dashboard' },
+  { id: 'queue', label: 'Queue' },
+  { id: 'preview', label: 'Preview' },
+  { id: 'logs', label: 'Logs' },
+  { id: 'settings', label: 'Settings' },
+];
+
 export function App() {
+  const [activeTab, setActiveTab] = useState<Tab>('dashboard');
   const [status, setStatus] = useState('未读取');
   const [logs, setLogs] = useState('');
   const [busy, setBusy] = useState(false);
@@ -48,21 +62,24 @@ export function App() {
 
   return (
     <main className="app-shell">
-      <section className="panel">
-        <p className="eyebrow">Steam Experience Sync</p>
-        <h1>Steam 体验记录控制台</h1>
-        <div className="toolbar">
-          <button disabled={busy} onClick={runLoop}>连续运行</button>
-          <button disabled={busy} onClick={stop}>停止</button>
-          <button disabled={busy} onClick={refresh}>刷新状态</button>
-        </div>
-        <h2>状态</h2>
-        <pre>{status}</pre>
-        <h2>日志</h2>
-        <pre>{logs || '暂无日志'}</pre>
-      </section>
-      <Preview />
-      <Settings />
+      <nav className="tabbar" aria-label="Main navigation">
+        {tabs.map((tab) => (
+          <button
+            className={activeTab === tab.id ? 'active' : ''}
+            key={tab.id}
+            onClick={() => setActiveTab(tab.id)}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </nav>
+      {activeTab === 'dashboard' ? (
+        <Dashboard busy={busy} status={status} onRefresh={refresh} onRunLoop={runLoop} onStop={stop} />
+      ) : null}
+      {activeTab === 'queue' ? <Queue /> : null}
+      {activeTab === 'preview' ? <Preview /> : null}
+      {activeTab === 'logs' ? <Logs busy={busy} logs={logs} onRefresh={refresh} /> : null}
+      {activeTab === 'settings' ? <Settings /> : null}
     </main>
   );
 }

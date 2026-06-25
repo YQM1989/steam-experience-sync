@@ -10,6 +10,7 @@ pub fn run() {
             commands::get_status,
             commands::get_logs,
             commands::plan_writes,
+            commands::read_discovery_index,
             commands::read_pending_writes,
             commands::read_config,
             commands::start_worker_loop,

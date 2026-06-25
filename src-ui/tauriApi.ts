@@ -32,6 +32,17 @@ export type PendingWrites = {
   items: PendingWrite[];
 };
 
+export type DiscoveredGame = {
+  appid: string;
+  name: string;
+  screenshotIds?: string[];
+  lastSeenAt?: string;
+};
+
+export type DiscoveryIndex = {
+  games: Record<string, DiscoveredGame>;
+};
+
 export async function getStatus(): Promise<string> {
   return invoke<string>('get_status');
 }
@@ -63,6 +74,11 @@ export async function applyPendingWrites(): Promise<CommandResult> {
 
 export async function clearPendingWrites(): Promise<CommandResult> {
   return invoke<CommandResult>('clear_pending_writes');
+}
+
+export async function readDiscoveryIndex(): Promise<DiscoveryIndex> {
+  const raw = await invoke<string>('read_discovery_index');
+  return JSON.parse(raw) as DiscoveryIndex;
 }
 
 export async function readConfig(): Promise<GuiConfig> {

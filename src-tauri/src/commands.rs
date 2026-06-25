@@ -107,6 +107,11 @@ pub fn clear_pending_writes() -> Result<CommandResult, String> {
 }
 
 #[tauri::command]
+pub fn read_discovery_index() -> Result<String, String> {
+    run_node(&["src/index.mjs", "--read-discovery"])
+}
+
+#[tauri::command]
 pub fn read_config() -> Result<String, String> {
     run_node(&[
         "-e",

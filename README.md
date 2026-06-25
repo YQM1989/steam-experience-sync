@@ -1,25 +1,25 @@
 # Steam Experience Sync
 
-把公开 Steam 截图动态同步到 Obsidian 的轻量工具。目标不是全量游戏库备份，而是记录“我主动截图并写过评价的游戏体验”。
+把公开 Steam 截图动态同步到 Obsidian 的轻量工具。目标不是备份完整游戏库，而是记录“我主动截图并写过评价的游戏体验”。
 
 ## 当前能力
 
-- 读取公开 Steam 截图页。
-- 抽取 `publishedfileid`、游戏名、appid、截图说明、截图图片、发布时间。
-- 通过 Steam 商店 `appdetails` 补充封面图。
+- 读取公开 Steam 截图页面，提取截图 ID、游戏名、appid、评价文字、截图图片和发布时间。
+- 按游戏归档到 Obsidian：一款游戏一个 Markdown 文件，截图在文件内按日期分段。
+- 通过 Steam 商店接口补充横版封面图。
 - 如果提供 `STEAM_API_KEY`，额外补充累计游玩时长。
-- 自动按游戏归档，一款游戏一个 Markdown 文件，截图在文件内按日期分段。
-- 用 state 文件去重，避免重复追加同一张截图。
-- 支持 `--dry-run`，先预览不写入。
-- 支持 `--all` 回扫全部公开截图页，补齐历史截图评价。
+- 使用 state 文件去重，避免重复写入同一张截图。
+- 支持 discovery index，减少后续空扫。
+- 支持 pending write preview：先生成待写入队列，再由 GUI 确认写入或跳过。
+- 遇到 429 会冷却；连续 3 次限流失败会暂停 worker 并通知。
 
 ## 不做什么
 
-- 不抓好友可见或私密内容。
-- 不保存 Cookie。
-- 不处理 Steam 登录态。
-- 不全量导入游戏库。
-- 不把 API Key 写进 Obsidian。
+- 不读取好友可见或私密内容。
+- 不保存 Cookie、不复用 Steam 登录态。
+- 不绕过验证码、Cloudflare 或 Steam 风控。
+- 不全量导入没有截图评价的游戏库。
+- 不把 API Key 写入 Obsidian 笔记、README、日志或 Git。
 
 ## 准备
 
@@ -34,68 +34,44 @@ Copy-Item .env.example .env
 ```env
 STEAM_ID=your_steamid64
 OBSIDIAN_VAULT_DIR=D:\Path\To\Your\ObsidianVault
-STEAM_API_KEY=你的key，可留空
+STEAM_API_KEY=可留空
 ```
 
-`STEAM_API_KEY` 只用于补充累计游玩时长；截图动态本身不依赖它。
+`STEAM_API_KEY` 只用于补充游玩时长；截图动态来自公开网页，本身不依赖 API Key。
 
-同步状态默认写到：
+默认运行数据写入：
 
 ```text
-<your-vault>\.obsidian\steam-experience-sync\state.json
+<your-vault>\.obsidian\steam-experience-sync\
 ```
 
-这个文件只记录已处理过的 Steam 截图 ID，用于减少重复请求；它不是内容笔记。
+这里保存 `state.json`、`discovered-games.json`、`pending-writes.json`、worker 日志和 stop file。它们是运行状态，不是正文笔记。
 
-## 运行
+## 命令行运行
 
-Windows / macOS 都一样：
+Windows / macOS 都可以运行：
 
 ```bash
 node src/index.mjs --dry-run
 node src/index.mjs
 ```
 
-## GUI 控制面板
-
-如果不想每次敲命令，可以启动本地 GUI：
-
-```bash
-npm run gui
-```
-
-然后在浏览器打开：
-
-```text
-http://127.0.0.1:8765
-```
-
-GUI 提供两种运行模式：
-
-- 运行一轮：等同于 `npm run worker`，处理一小批后退出。
-- 连续运行：等同于 `npm run worker:loop`，每轮结束后按 `STEAM_WORKER_LOOP_DELAY_MS` 等待，默认 10 秒，然后继续下一轮。
-
-GUI 也可以停止、恢复、查看队列进度和 worker 日志。它只绑定本机 `127.0.0.1`，不提供外网访问。
-
-GUI 和 `worker:status` 的时间显示统一使用北京时间；内部 `state.json` 仍保存 ISO 时间，便于冷却判断和跨设备兼容。
-
-常用参数：
+常用命令：
 
 ```bash
 node src/index.mjs --dry-run --limit 5
 node src/index.mjs --pages 2
-node src/index.mjs --since-id 3739718595
-node src/index.mjs --all --appid 2358720 --dry-run --request-delay-ms 10000
+node src/index.mjs --discover --pages 3 --request-delay-ms 10000
+node src/index.mjs --plan-writes --pages 1 --limit 5 --request-delay-ms 10000
+node src/index.mjs --read-pending
+node src/index.mjs --apply-pending
+node src/index.mjs --clear-pending
 node src/index.mjs --all --appid 2358720 --max-matches 5 --request-delay-ms 10000
-node src/index.mjs --all --max-games 5 --limit 5 --dry-run --request-delay-ms 15000 --page-delay-ms 15000
-node src/index.mjs --all --dry-run
-node src/index.mjs --all
-node src/index.mjs --all --request-delay-ms 8000
 ```
 
 ## Worker 模式
 
-Worker 模式用于把历史同步拆成低频小批次。它不是常驻进程，每次运行只处理一小批截图，然后自动退出，适合手动执行、Windows 任务计划程序或 macOS launchd。
+Worker 用于把历史同步拆成低频小批次。它不是开机自启服务，每轮处理一小批后退出或等待下一轮。
 
 ```bash
 npm run worker:dry-run
@@ -112,69 +88,119 @@ npm run worker:resume
 STEAM_WORKER_APPIDS=2758000,4181110,1091500
 STEAM_WORKER_BATCH_SIZE=5
 STEAM_WORKER_PAGES=3
-STEAM_REQUEST_DELAY_MS=30000
-STEAM_PAGE_DELAY_MS=60000
+STEAM_REQUEST_DELAY_MS=10000
+STEAM_PAGE_DELAY_MS=15000
 STEAM_WORKER_LOOP_DELAY_MS=10000
 STEAM_WORKER_COOLDOWN_ON_429_MS=28800000
 ```
 
-- `npm run worker`：运行一轮，处理队列中当前 appid 的一小批截图，完成后退出。
-- `npm run worker:loop`：持续运行多轮 worker；每轮结束后等待 `STEAM_WORKER_LOOP_DELAY_MS`，默认 10 秒，直到遇到停止文件、冷却或错误。
-- `npm run worker:status`：查看当前队列、下一个 appid、每个 appid 的下一页、冷却和停止状态。
-- `npm run worker:stop`：创建停止文件，后续 worker 启动后会立刻退出。
-- `npm run worker:resume`：删除停止文件，允许 worker 继续运行。
-- 遇到 `429 Too Many Requests` 时，worker 会记录冷却时间并退出。默认冷却 8 小时，下次启动时如果还在冷却期，会直接跳过。
-- 日志默认写入 `<your-vault>\.obsidian\steam-experience-sync\worker.log`。
-- 停止文件默认是 `<your-vault>\.obsidian\steam-experience-sync\stop-worker`。
-- 如果某一轮输出写入 0 张，不一定是错误；通常表示当前 appid 的当前几页已经没有未录入截图，worker 会把页码和队列推进到下一轮。
+说明：
 
-日期归档使用 Steam 截图详情页里的 `Posted` 时间。这个时间更准确地说是 Steam 公开截图的发布/上传时间，不一定等于本地截图文件的原始拍摄时间。当前脚本不会读取 Steam 客户端本地截图文件。
+- `npm run worker`：运行一轮，处理当前 appid 的一小批截图后退出。
+- `npm run worker:loop`：连续运行多轮；每轮结束后等待 `STEAM_WORKER_LOOP_DELAY_MS`，默认 10 秒。
+- `npm run worker:status`：查看队列、下一个 appid、页码、冷却和暂停状态。
+- `npm run worker:stop`：创建 stop file，后续 worker 启动会退出。
+- `npm run worker:resume`：删除 stop file。
+- 遇到 429 后会冷却；连续 3 次 429 会写 stop file，并在桌面 GUI 中触发通知。
 
-全量回扫会访问较多 Steam 页面，建议保留默认请求间隔；如果遇到 `429 Too Many Requests`，脚本会等待后重试。多次触发时不要立刻反复运行，等 30-60 分钟后用更大的 `--request-delay-ms` 重跑。
+状态时间显示统一使用北京时间；内部 JSON 仍保存 ISO 时间，方便跨设备判断。
 
-建议全量导入策略：
+## 本地网页 GUI
 
-- 第一次先跑 `node src/index.mjs --all --dry-run --request-delay-ms 8000`。
-- 确认输出目标正常后，再跑 `node src/index.mjs --all --request-delay-ms 8000`。
-- 想一款游戏一款游戏补历史时，用 `--appid`。如果仍然遇到限流，再加 `--max-matches` 分批，例如 `node src/index.mjs --all --appid 2358720 --max-matches 5 --request-delay-ms 10000`。
-- 想让脚本自动挑选前几款有新截图的游戏时，用 `--max-games`。例如 `node src/index.mjs --all --max-games 5 --limit 5 --request-delay-ms 15000 --page-delay-ms 15000`。
-- `--request-delay-ms` 控制截图详情页请求间隔，`--page-delay-ms` 控制截图列表翻页间隔。Steam 开始返回 429 时，优先把这两个值都调大。
-- 如果截图很多，把 `--all` 拆成 `--pages 3`、`--pages 5` 逐步增加，而不是连续高频全量回扫。
-- 不使用 Cookie、登录态、代理池或绕过 Cloudflare / Steam 防护的方式；这个工具只同步公开页面。
+旧版网页 GUI 仍保留为 fallback：
 
-如果已经运行过普通同步，state 文件会记住已处理截图。需要补齐历史时使用 `--all`，它会扫描所有公开截图页，但仍会跳过 state 和现有 Markdown 来源链接里已经记录过的截图 `id`。只有同时传 `--resync` 才会强制重扫已记录项。
-
-## 默认输出
-
-```text
-<your-vault>\00_输入源\50_我是谁\Steam体验记录\游戏名.md
+```bash
+npm run gui
 ```
 
-同一游戏的多张截图会追加到同一个文件，日期只作为文件内 `## YYYY-MM-DD` 分段。截图 ID 不作为标题显示，只保留在来源链接里用于回溯和去重。
+打开：
 
-## Obsidian 样式
+```text
+http://127.0.0.1:8765
+```
 
-脚本会给笔记写入 `cssclasses: steam-experience`，并输出可被 CSS 美化的封面区域。项目内样式源文件见：
+它只绑定本机 `127.0.0.1`，不提供外网访问。
+
+## Desktop App
+
+第一版桌面应用使用 React + Tauri。当前仍要求本机已安装 Node.js，因为 Tauri 壳会调用现有 Node 同步核心。
+
+### Windows
+
+```powershell
+npm install
+npm run tauri:dev
+```
+
+打包：
+
+```powershell
+npm run tauri:build
+```
+
+构建产物在：
+
+```text
+src-tauri\target\release\bundle\
+```
+
+### macOS
+
+```bash
+npm install
+npm run tauri:dev
+```
+
+打包：
+
+```bash
+npm run tauri:build
+```
+
+macOS 需要 Rust toolchain 和 Xcode Command Line Tools。Apple Silicon / Intel 都应保持源码兼容，但安装包签名、公证不在第一版范围内。
+
+### 桌面应用界面
+
+- Dashboard：查看状态，连续运行、停止、刷新。
+- Queue：查看 discovery index 里有截图的游戏。
+- Preview：生成待写入队列，确认写入或跳过本轮。
+- Logs：查看运行日志。
+- Settings：编辑 Steam ID、API Key、vault 路径和请求间隔。
+
+API Key 在 GUI 中默认以密码框显示；`.steam-experience-sync/config.json` 已被 `.gitignore` 忽略，不要提交真实密钥。
+
+## Obsidian 输出
+
+默认输出：
+
+```text
+<your-vault>\00_输入源\50_我是谁\Steam体验记录\<游戏名>.md
+```
+
+同一游戏的多张截图追加到同一文件，日期只作为文件内 `## YYYY-MM-DD` 分段。截图 ID 不作为标题显示，只保留在来源链接和内部去重标记里。
+
+脚本会写入 `cssclasses: steam-experience`。样式参考：
 
 ```text
 docs\obsidian-steam-experience.css
 ```
 
-使用时可把这份 CSS 复制到 Obsidian 的 snippets 目录，例如：
+可复制到：
 
 ```text
 <your-vault>\.obsidian\snippets\steam-experience.css
 ```
 
-然后在 Obsidian `设置 -> 外观 -> CSS snippets` 中启用 `steam-experience`。
+然后在 Obsidian `设置 -> 外观 -> CSS snippets` 启用。
 
-## 建议入库方式
+## 全量导入建议
 
-第一阶段先手动运行：
+全量回扫会访问较多 Steam 页面，建议保守运行：
 
-```bash
-node src/index.mjs --dry-run
-node src/index.mjs
-```
+1. 先 discovery：`node src/index.mjs --discover --pages 3 --request-delay-ms 10000`
+2. 再预览：`node src/index.mjs --plan-writes --pages 1 --limit 5 --request-delay-ms 10000`
+3. 在 GUI Preview 中确认内容。
+4. 确认无误后写入：`node src/index.mjs --apply-pending`
+5. 历史很多时按 `--appid` 一款游戏一款游戏处理。
 
-确认稳定后，再做 Windows 计划任务或 macOS launchd。不要一开始就做后台常驻。
+不要连续高频全量回扫。遇到 429 时先等待冷却，再提高 `STEAM_REQUEST_DELAY_MS` 和 `STEAM_PAGE_DELAY_MS`。
