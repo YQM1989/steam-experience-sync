@@ -1,5 +1,6 @@
 use serde::Serialize;
 use std::io::Write;
+use std::path::Path;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
@@ -12,23 +13,38 @@ pub struct CommandResult {
 fn project_root() -> Result<PathBuf, String> {
     if let Ok(value) = std::env::var("STEAM_EXPERIENCE_SYNC_ROOT") {
         let path = PathBuf::from(value);
-        if path.join("src").join("index.mjs").exists() {
+        if is_project_root(&path) {
             return Ok(path);
         }
     }
 
     let cwd = std::env::current_dir().map_err(|error| error.to_string())?;
-    if cwd.join("src").join("index.mjs").exists() {
-        return Ok(cwd);
+    if let Some(root) = find_project_root_from(&cwd) {
+        return Ok(root);
     }
 
-    if let Some(parent) = cwd.parent() {
-        if parent.join("src").join("index.mjs").exists() {
-            return Ok(parent.to_path_buf());
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(parent) = exe.parent() {
+            if let Some(root) = find_project_root_from(parent) {
+                return Ok(root);
+            }
         }
     }
 
     Err("Cannot locate project root containing src/index.mjs.".to_string())
+}
+
+fn find_project_root_from(start: &Path) -> Option<PathBuf> {
+    for candidate in start.ancestors() {
+        if is_project_root(candidate) {
+            return Some(candidate.to_path_buf());
+        }
+    }
+    None
+}
+
+fn is_project_root(path: &Path) -> bool {
+    path.join("src").join("index.mjs").exists()
 }
 
 fn run_node(args: &[&str]) -> Result<String, String> {
@@ -44,7 +60,33 @@ fn run_node(args: &[&str]) -> Result<String, String> {
     } else {
         let stderr = String::from_utf8_lossy(&output.stderr).to_string();
         let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-        Err(if stderr.trim().is_empty() { stdout } else { stderr })
+        Err(if stderr.trim().is_empty() {
+            stdout
+        } else {
+            stderr
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::find_project_root_from;
+    use std::fs;
+
+    #[test]
+    fn finds_project_root_from_tauri_release_directory() {
+        let root = std::env::temp_dir().join(format!(
+            "steam-experience-sync-root-test-{}",
+            std::process::id()
+        ));
+        let release = root.join("src-tauri").join("target").join("release");
+        fs::create_dir_all(root.join("src")).unwrap();
+        fs::create_dir_all(&release).unwrap();
+        fs::write(root.join("src").join("index.mjs"), "").unwrap();
+
+        let found = find_project_root_from(&release).unwrap();
+
+        assert_eq!(found, root);
     }
 }
 
@@ -139,7 +181,9 @@ pub fn write_config(payload: String) -> Result<CommandResult, String> {
             .map_err(|error| error.to_string())?;
     }
 
-    let output = child.wait_with_output().map_err(|error| error.to_string())?;
+    let output = child
+        .wait_with_output()
+        .map_err(|error| error.to_string())?;
     if output.status.success() {
         Ok(CommandResult {
             ok: true,
