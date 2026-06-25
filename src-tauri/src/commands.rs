@@ -103,6 +103,16 @@ pub fn get_logs() -> Result<String, String> {
 #[tauri::command]
 pub fn start_worker_loop() -> Result<CommandResult, String> {
     let root = project_root()?;
+    let clear_output = Command::new("node")
+        .arg("src/index.mjs")
+        .arg("--clear-worker-stop")
+        .current_dir(&root)
+        .output()
+        .map_err(|error| error.to_string())?;
+    if !clear_output.status.success() {
+        return Err(String::from_utf8_lossy(&clear_output.stderr).to_string());
+    }
+
     Command::new("node")
         .arg("src/index.mjs")
         .arg("--worker-loop")
@@ -115,7 +125,7 @@ pub fn start_worker_loop() -> Result<CommandResult, String> {
 
     Ok(CommandResult {
         ok: true,
-        message: "worker loop started".to_string(),
+        message: "worker loop started; stop file cleared".to_string(),
     })
 }
 
