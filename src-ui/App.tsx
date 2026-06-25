@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
-import { getLogs, getStatus, startWorkerLoop, stopWorker } from './tauriApi';
+import { Preview } from './Preview';
 import { Settings } from './Settings';
+import { getLogs, getStatus, startWorkerLoop, stopWorker } from './tauriApi';
 
 export function App() {
   const [status, setStatus] = useState('未读取');
@@ -55,6 +56,7 @@ export function App() {
         <h2>日志</h2>
         <pre>{logs || '暂无日志'}</pre>
       </section>
+      <Preview />
       <Settings />
     </main>
   );

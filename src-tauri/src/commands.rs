@@ -84,6 +84,29 @@ pub fn stop_worker() -> Result<CommandResult, String> {
 }
 
 #[tauri::command]
+pub fn read_pending_writes() -> Result<String, String> {
+    run_node(&["src/index.mjs", "--read-pending"])
+}
+
+#[tauri::command]
+pub fn plan_writes() -> Result<CommandResult, String> {
+    let message = run_node(&["src/index.mjs", "--plan-writes"])?;
+    Ok(CommandResult { ok: true, message })
+}
+
+#[tauri::command]
+pub fn apply_pending_writes() -> Result<CommandResult, String> {
+    let message = run_node(&["src/index.mjs", "--apply-pending"])?;
+    Ok(CommandResult { ok: true, message })
+}
+
+#[tauri::command]
+pub fn clear_pending_writes() -> Result<CommandResult, String> {
+    let message = run_node(&["src/index.mjs", "--clear-pending"])?;
+    Ok(CommandResult { ok: true, message })
+}
+
+#[tauri::command]
 pub fn read_config() -> Result<String, String> {
     run_node(&[
         "-e",

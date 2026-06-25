@@ -5,10 +5,13 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import process from 'node:process';
 import { readDiscoveryIndex, upsertDiscoveredScreenshot, writeDiscoveryIndex } from './core/discovery-store.mjs';
+import { clearPendingWrites, readPendingWrites, writePendingWrites } from './core/pending-writes.mjs';
+import { parseSteamPostedAt } from './core/steam-date.mjs';
 
 const DEFAULT_EXPERIENCE_DIR = '00_输入源/50_我是谁/Steam体验记录';
 const DEFAULT_STATE_PATH = '.obsidian/steam-experience-sync/state.json';
 const DEFAULT_DISCOVERY_PATH = '.obsidian/steam-experience-sync/discovered-games.json';
+const DEFAULT_PENDING_WRITES_PATH = '.obsidian/steam-experience-sync/pending-writes.json';
 const DEFAULT_REQUEST_DELAY_MS = 1200;
 const DEFAULT_RETRY_AFTER_MS = 60000;
 const DEFAULT_WORKER_COOLDOWN_ON_429_MS = 8 * 60 * 60 * 1000;
@@ -41,6 +44,22 @@ async function main() {
     await runDiscovery(config, args);
     return;
   }
+  if (args.readPending) {
+    await printPendingWrites(config);
+    return;
+  }
+  if (args.planWrites) {
+    await planWrites(config, args);
+    return;
+  }
+  if (args.applyPending) {
+    await applyPendingWrites(config);
+    return;
+  }
+  if (args.clearPending) {
+    await clearPendingQueue(config);
+    return;
+  }
   if (config.workerLoop) {
     await runWorkerLoop(config, args);
     return;
@@ -52,6 +71,107 @@ async function main() {
 
   const state = await readState(config.stateFile);
   await runOnce(config, args, state);
+}
+
+async function planWrites(config, args) {
+  const state = await readState(config.stateFile);
+  const existingIds = await collectExistingScreenshotIds(config.outputDir);
+  state.seenPublishedFileIds = unique([...state.seenPublishedFileIds, ...existingIds]);
+  const items = await collectCandidateItems(config, args, state);
+  const pending = {
+    createdAt: new Date().toISOString(),
+    outputDir: config.outputDir,
+    items: items.map((item) => ({
+      ...item,
+      targetFile: path.join(config.outputDir, `${safeFileName(item.game)}.md`),
+    })),
+  };
+  await writePendingWrites(config.pendingWritesFile, pending);
+  console.log(`Planned ${pending.items.length} pending write(s) at ${config.pendingWritesFile}`);
+}
+
+async function applyPendingWrites(config) {
+  const pending = await readPendingWrites(config.pendingWritesFile);
+  const items = Array.isArray(pending.items) ? pending.items : [];
+  const state = await readState(config.stateFile);
+  const processed = [];
+
+  for (const item of items) {
+    const target = await upsertExperienceNote(config.outputDir, item);
+    processed.push(String(item.id));
+    console.log(`Wrote ${target}`);
+  }
+
+  if (processed.length > 0) {
+    state.seenPublishedFileIds = unique([...state.seenPublishedFileIds, ...processed]);
+    state.updatedAt = new Date().toISOString();
+    await writeState(config.stateFile, state);
+  }
+
+  await clearPendingWrites(config.pendingWritesFile);
+  console.log(`Applied ${processed.length} pending write(s).`);
+}
+
+async function printPendingWrites(config) {
+  const pending = await readPendingWrites(config.pendingWritesFile);
+  console.log(JSON.stringify(pending, null, 2));
+}
+
+async function clearPendingQueue(config) {
+  await clearPendingWrites(config.pendingWritesFile);
+  console.log(`Cleared pending writes at ${config.pendingWritesFile}`);
+}
+
+async function collectCandidateItems(config, args, state) {
+  const playtimeMap = config.steamApiKey
+    ? await fetchOwnedGamePlaytimes(config.steamId, config.steamApiKey).catch((error) => {
+        console.warn('Playtime enrichment skipped:', error.message);
+        return new Map();
+      })
+    : new Map();
+
+  const coverMap = new Map();
+  const items = [];
+  const seenListIds = new Set();
+  const selectedAppids = new Set(config.appids);
+  const autoSelectGames = config.appids.length === 0 && config.maxGames !== 'all';
+  let matchedCount = 0;
+  let scannedCount = 0;
+
+  screenshotPages:
+  for await (const pageResult of collectScreenshotIdPages(config)) {
+    for (const id of pageResult.ids) {
+      if (seenListIds.has(id)) continue;
+      seenListIds.add(id);
+      if (args.sinceId && id === String(args.sinceId)) break screenshotPages;
+      if (!config.resync && state.seenPublishedFileIds.includes(id)) continue;
+      if (config.limit !== 'all' && scannedCount >= config.limit) break screenshotPages;
+
+      scannedCount += 1;
+      if (scannedCount > 1 && config.requestDelayMs > 0) {
+        await sleep(config.requestDelayMs);
+      }
+
+      const item = await fetchScreenshotDetail(id);
+      if (config.appids.length > 0 && !config.appids.includes(String(item.appid))) continue;
+      if (autoSelectGames && !selectedAppids.has(String(item.appid))) {
+        if (selectedAppids.size >= config.maxGames) continue;
+        selectedAppids.add(String(item.appid));
+      }
+
+      matchedCount += 1;
+      item.playtimeMinutes = playtimeMap.get(String(item.appid)) ?? null;
+      if (!coverMap.has(String(item.appid))) {
+        coverMap.set(String(item.appid), await fetchGameCover(item.appid).catch(() => null));
+      }
+      item.cover = coverMap.get(String(item.appid));
+      items.push(item);
+
+      if (config.maxMatches !== 'all' && matchedCount >= config.maxMatches) break screenshotPages;
+    }
+  }
+
+  return items;
 }
 
 async function runDiscovery(config, args) {
@@ -366,6 +486,7 @@ function readConfig(args) {
   const experienceDir = args.output || process.env.STEAM_EXPERIENCE_DIR || DEFAULT_EXPERIENCE_DIR;
   const statePath = args.state || process.env.STEAM_SYNC_STATE || DEFAULT_STATE_PATH;
   const discoveryPath = args.discoveryFile || process.env.STEAM_DISCOVERY_FILE || DEFAULT_DISCOVERY_PATH;
+  const pendingWritesPath = args.pendingWritesFile || process.env.STEAM_PENDING_WRITES_FILE || DEFAULT_PENDING_WRITES_PATH;
   const requestDelayMs = parseNonNegativeInteger(args.requestDelayMs || process.env.STEAM_REQUEST_DELAY_MS || DEFAULT_REQUEST_DELAY_MS);
   const workerLogPath = args.workerLog || process.env.STEAM_WORKER_LOG || '.obsidian/steam-experience-sync/worker.log';
   const workerStopPath = args.workerStop || process.env.STEAM_WORKER_STOP_FILE || '.obsidian/steam-experience-sync/stop-worker';
@@ -377,6 +498,7 @@ function readConfig(args) {
     outputDir: path.resolve(vaultDir, fromVaultPath(experienceDir)),
     stateFile: path.resolve(vaultDir, fromVaultPath(statePath)),
     discoveryFile: path.resolve(vaultDir, fromVaultPath(discoveryPath)),
+    pendingWritesFile: path.resolve(vaultDir, fromVaultPath(pendingWritesPath)),
     pages: parseCount(args.pages || process.env.STEAM_LOOKBACK_PAGES || 1),
     startPage: parseCount(args.startPage || process.env.STEAM_START_PAGE || 1),
     limit: parseCount(args.limit || process.env.STEAM_LIMIT || 20),
@@ -411,6 +533,10 @@ function parseArgs(argv) {
     else if (arg === '--clear-worker-stop') out.clearWorkerStop = true;
     else if (arg === '--worker-status') out.workerStatus = true;
     else if (arg === '--discover') out.discover = true;
+    else if (arg === '--read-pending') out.readPending = true;
+    else if (arg === '--plan-writes') out.planWrites = true;
+    else if (arg === '--apply-pending') out.applyPending = true;
+    else if (arg === '--clear-pending') out.clearPending = true;
     else if (arg === '--all') {
       out.pages = 'all';
       out.limit = 'all';
@@ -421,6 +547,7 @@ function parseArgs(argv) {
     else if (arg === '--output') out.output = argv[++i];
     else if (arg === '--state') out.state = argv[++i];
     else if (arg === '--discovery-file') out.discoveryFile = argv[++i];
+    else if (arg === '--pending-writes-file') out.pendingWritesFile = argv[++i];
     else if (arg === '--appid') out.appid = argv[++i];
     else if (arg === '--appids') out.appids = argv[++i];
     else if (arg === '--worker-appids') out.workerAppids = argv[++i];
@@ -460,15 +587,20 @@ Options:
   --worker-loop      Keep running worker batches until stop file, cooldown, or error
   --stop-worker      Create stop file so future worker runs exit immediately
     --clear-worker-stop Remove worker stop file
-    --worker-status    Print worker queue, page, cooldown, and stop status
-    --discover         Scan public screenshots and update discovered-games index only
-    --all              Scan all public screenshot pages and write missing blocks
+  --worker-status    Print worker queue, page, cooldown, and stop status
+  --discover         Scan public screenshots and update discovered-games index only
+  --read-pending     Print pending write queue as JSON
+  --plan-writes      Scan screenshots and save pending writes without changing notes
+  --apply-pending    Write pending screenshots to notes and clear pending queue
+  --clear-pending    Clear pending write queue without changing notes
+  --all              Scan all public screenshot pages and write missing blocks
   --steam-id ID      Override STEAM_ID
   --api-key KEY      Override STEAM_API_KEY, avoid using this in shell history
   --vault PATH       Override OBSIDIAN_VAULT_DIR
     --output PATH      Vault-relative output directory
-    --state PATH       Vault-relative state file
-    --discovery-file PATH Vault-relative discovered games index
+  --state PATH       Vault-relative state file
+  --discovery-file PATH Vault-relative discovered games index
+  --pending-writes-file PATH Vault-relative pending writes queue
   --appid ID         Only write screenshots from one Steam appid
   --appids IDS       Only write screenshots from comma-separated Steam appids
   --worker-appids IDS Appid queue for worker mode
@@ -856,37 +988,6 @@ function extractPostedAt(html) {
   const statValues = [...html.matchAll(/<div class="detailsStatRight">\s*([^<]+?)\s*<\/div>/g)].map((m) => decodeHtml(m[1]).trim());
   const index = statLabels.findIndex((label) => label.toLowerCase() === 'posted');
   return index >= 0 ? statValues[index] : '';
-}
-
-function parseSteamPostedAt(value, now) {
-  if (!value) return now;
-  const normalized = value.replace(',', '').replace(/\s+/g, ' ').trim();
-  const withYear = normalized.match(/^([A-Za-z]{3,9}) (\d{1,2}) (\d{4}) @ (\d{1,2}):(\d{2})(am|pm)$/i);
-  const withoutYear = normalized.match(/^([A-Za-z]{3,9}) (\d{1,2}) @ (\d{1,2}):(\d{2})(am|pm)$/i);
-  const match = withYear || withoutYear;
-  if (!match) return now;
-
-  const month = monthIndex(match[1]);
-  if (month < 0) return now;
-  const hasYear = match.length === 7;
-  const year = hasYear ? Number(match[3]) : now.getFullYear();
-  const day = Number(match[2]);
-  const hourIndex = hasYear ? 4 : 3;
-  let hour = Number(match[hourIndex]);
-  const minute = Number(match[hourIndex + 1]);
-  const ampm = match[hourIndex + 2].toLowerCase();
-  if (ampm === 'pm' && hour !== 12) hour += 12;
-  if (ampm === 'am' && hour === 12) hour = 0;
-  const parsed = new Date(year, month, day, hour, minute, 0);
-
-  if (!hasYear && parsed.getTime() - now.getTime() > 1000 * 60 * 60 * 24 * 30) {
-    parsed.setFullYear(year - 1);
-  }
-  return parsed;
-}
-
-function monthIndex(name) {
-  return ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'].indexOf(name.slice(0, 3).toLowerCase());
 }
 
 function loadDotEnv(file) {
