@@ -2,6 +2,10 @@ import { render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { App } from './App';
 
+vi.mock('./notifications', () => ({
+  notifyPausedByRateLimit: vi.fn().mockResolvedValue(undefined),
+}));
+
 vi.mock('./tauriApi', () => ({
   applyPendingWrites: vi.fn().mockResolvedValue({ ok: true, message: 'applied' }),
   clearPendingWrites: vi.fn().mockResolvedValue({ ok: true, message: 'cleared' }),

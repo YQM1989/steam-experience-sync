@@ -6,6 +6,7 @@ import path from 'node:path';
 import process from 'node:process';
 import { readDiscoveryIndex, upsertDiscoveredScreenshot, writeDiscoveryIndex } from './core/discovery-store.mjs';
 import { clearPendingWrites, readPendingWrites, writePendingWrites } from './core/pending-writes.mjs';
+import { recordRateFailure, resetRateFailures } from './core/rate-state.mjs';
 import { parseSteamPostedAt } from './core/steam-date.mjs';
 
 const DEFAULT_EXPERIENCE_DIR = '00_输入源/50_我是谁/Steam体验记录';
@@ -307,8 +308,14 @@ async function runWorker(config, args) {
   const state = await readState(config.stateFile);
   state.worker = normalizeWorkerState(state.worker);
   const now = Date.now();
+  const forceRateLimit = process.env.STEAM_TEST_FORCE_429 === '1';
 
-  if (state.worker.cooldownUntil && Date.parse(state.worker.cooldownUntil) > now) {
+  if (!forceRateLimit && state.worker.pausedByRateLimit) {
+    console.log('Worker paused by repeated Steam rate limits. Clear the stop file after reviewing the logs.');
+    return;
+  }
+
+  if (!forceRateLimit && state.worker.cooldownUntil && Date.parse(state.worker.cooldownUntil) > now) {
     await writeWorkerLog(config, {
       level: 'info',
       event: 'cooldown_skip',
@@ -351,6 +358,10 @@ async function runWorker(config, args) {
   });
 
   try {
+    if (forceRateLimit) {
+      throw new HttpStatusError(429, 'Forced Rate Limit', 'STEAM_TEST_FORCE_429');
+    }
+
     const summary = await runOnce(workerConfig, args, state);
     const nextPage = summary.stoppedByMaxMatches
       ? Math.max(1, summary.lastScannedPage)
@@ -367,8 +378,11 @@ async function runWorker(config, args) {
     };
     state.worker.nextAppidIndex = (index + 1) % queue.length;
     state.worker.lastRunAt = new Date().toISOString();
-    state.worker.lastError = null;
-    state.worker.consecutiveFailures = 0;
+    state.worker = {
+      ...resetRateFailures(state.worker),
+      lastError: null,
+      consecutiveFailures: 0,
+    };
     if (!config.dryRun) await writeState(config.stateFile, state);
 
     await writeWorkerLog(config, {
@@ -384,7 +398,12 @@ async function runWorker(config, args) {
     console.log(`Next worker run will start with appid ${queue[state.worker.nextAppidIndex]}.`);
   } catch (error) {
     if (error.status === 429) {
-      state.worker.cooldownUntil = new Date(Date.now() + config.workerCooldownOn429Ms).toISOString();
+      state.worker = recordRateFailure(state.worker, new Date().toISOString());
+      const cooldownMultiplier = Math.min(Number(state.worker.consecutiveRateFailures || 1), 3);
+      state.worker.cooldownUntil = new Date(Date.now() + config.workerCooldownOn429Ms * cooldownMultiplier).toISOString();
+      if (state.worker.pausedByRateLimit && !config.dryRun) {
+        await requestWorkerStop(config);
+      }
     }
     state.worker.lastError = {
       message: error.message,
@@ -401,10 +420,13 @@ async function runWorker(config, args) {
       status: error.status || null,
       message: error.message,
       cooldownUntil: state.worker.cooldownUntil || null,
+      consecutiveRateFailures: state.worker.consecutiveRateFailures || 0,
+      pausedByRateLimit: Boolean(state.worker.pausedByRateLimit),
     });
 
     if (error.status === 429) {
-      console.warn(`Worker stopped on 429; cooldown until ${formatBeijingDateTime(state.worker.cooldownUntil)}`);
+      const pauseMessage = state.worker.pausedByRateLimit ? ' Repeated failures reached 3; worker stop requested.' : '';
+      console.warn(`Worker stopped on 429; cooldown until ${formatBeijingDateTime(state.worker.cooldownUntil)}.${pauseMessage}`);
       return;
     }
     throw error;
@@ -469,6 +491,8 @@ async function printWorkerStatus(config) {
   console.log(`  stop file: ${stopExists ? 'present' : 'absent'}`);
   console.log(`  timezone: 北京时间`);
   console.log(`  cooldown: ${cooldownActive ? formatBeijingDateTime(worker.cooldownUntil) : 'inactive'}`);
+  console.log(`  rate limit failures: ${worker.consecutiveRateFailures}`);
+  console.log(`  paused by rate limit: ${worker.pausedByRateLimit ? 'yes' : 'no'}`);
   console.log(`  last run: ${worker.lastRunAt ? formatBeijingDateTime(worker.lastRunAt) : '(never)'}`);
   console.log(`  last error: ${worker.lastError ? worker.lastError.message : '(none)'}`);
   for (const appid of queue) {
@@ -861,6 +885,9 @@ function normalizeWorkerState(value) {
     lastRunAt: value?.lastRunAt || null,
     lastError: value?.lastError || null,
     consecutiveFailures: Number(value?.consecutiveFailures || 0),
+    consecutiveRateFailures: Number(value?.consecutiveRateFailures || 0),
+    lastRateFailureAt: value?.lastRateFailureAt || null,
+    pausedByRateLimit: Boolean(value?.pausedByRateLimit),
     appids: value?.appids && typeof value.appids === 'object' ? value.appids : {},
   };
 }

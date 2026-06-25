@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { notifyPausedByRateLimit } from './notifications';
 import { Preview } from './Preview';
 import { Settings } from './Settings';
 import { getLogs, getStatus, startWorkerLoop, stopWorker } from './tauriApi';
@@ -9,7 +10,11 @@ export function App() {
   const [busy, setBusy] = useState(false);
 
   async function refresh() {
-    setStatus(await getStatus());
+    const nextStatus = await getStatus();
+    setStatus(nextStatus);
+    if (nextStatus.includes('paused by rate limit: yes')) {
+      await notifyPausedByRateLimit();
+    }
     setLogs(await getLogs());
   }
 
