@@ -145,7 +145,7 @@ async function readStatus() {
       workerPages: env.STEAM_WORKER_PAGES || '3',
       requestDelayMs: env.STEAM_REQUEST_DELAY_MS || '',
       pageDelayMs: env.STEAM_PAGE_DELAY_MS || '',
-      loopDelayMs: env.STEAM_WORKER_LOOP_DELAY_MS || '10000',
+      loopDelayMs: env.STEAM_WORKER_LOOP_DELAY_MS || '60000',
       timezone: '北京时间',
       vaultDir,
     },

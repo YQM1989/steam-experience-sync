@@ -271,6 +271,141 @@ select {
   font-size: 13px;
 }
 
+/* Dashboard status badges */
+.status-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 16px 0 14px;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  border: 1px solid #3c3c3c;
+  border-radius: 999px;
+  padding: 2px 12px;
+  font-size: 13px;
+}
+
+.badge-ok {
+  color: #82d39f;
+  border-color: #2a5a3a;
+  background: #1a2d1e;
+}
+
+.badge-warn {
+  color: #ffd27a;
+  border-color: #6b5a2a;
+  background: #2d261a;
+}
+
+.badge-danger {
+  color: #ff7b7b;
+  border-color: #6b2a2a;
+  background: #2d1a1a;
+}
+
+.badge-info {
+  color: #9f8fff;
+  border-color: #3a2a6b;
+  background: #201a2d;
+}
+
+/* Dashboard status grid */
+.status-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+  margin: 0 0 16px;
+}
+
+.status-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid #343434;
+  border-radius: 6px;
+  padding: 10px 14px;
+  background: #181818;
+}
+
+.status-label {
+  color: #8f8982;
+  font-size: 13px;
+}
+
+.status-value {
+  color: #e7e1d8;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+/* Error banner */
+.error-banner {
+  border: 1px solid #6b2a2a;
+  border-radius: 6px;
+  margin: 0 0 16px;
+  padding: 10px 14px;
+  color: #ffa7a7;
+  background: #2d1a1a;
+  font-size: 13px;
+}
+
+.info-banner {
+  border: 1px solid #3a2a6b;
+  border-radius: 6px;
+  margin: 0 0 16px;
+  padding: 10px 14px;
+  color: #c9c0ff;
+  background: #201a2d;
+  font-size: 13px;
+}
+
+/* Live output */
+.live-output {
+  min-height: 120px;
+  max-height: 300px;
+  overflow: auto;
+  margin: 8px 0 0;
+  border: 1px solid #333;
+  border-radius: 6px;
+  padding: 12px;
+  color: #d2cec8;
+  background: #111;
+  font: 13px Consolas, "SFMono-Regular", monospace;
+  white-space: pre-wrap;
+}
+
+/* Table */
+.table-wrap {
+  overflow-x: auto;
+  margin-top: 8px;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+th,
+td {
+  border-bottom: 1px solid #343434;
+  padding: 9px 10px;
+  text-align: left;
+}
+
+th {
+  color: #8f8982;
+  font-weight: 500;
+}
+
+.mono {
+  font-family: Consolas, "SFMono-Regular", monospace;
+}
+
 @media (max-width: 720px) {
   body {
     min-width: 0;

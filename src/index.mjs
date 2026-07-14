@@ -6,8 +6,24 @@ import path from 'node:path';
 import process from 'node:process';
 import { readDiscoveryIndex, upsertDiscoveredScreenshot, writeDiscoveryIndex } from './core/discovery-store.mjs';
 import { clearPendingWrites, readPendingWrites, writePendingWrites } from './core/pending-writes.mjs';
+import {
+  computePageDelay,
+  computeRequestDelay,
+  formatRateLimiterSummary,
+  loadRateLimiterState,
+  record429,
+  record5xx,
+  recordSuccess,
+  saveRateLimiterState,
+} from './core/rate-limiter.mjs';
 import { recordRateFailure, resetRateFailures } from './core/rate-state.mjs';
 import { parseSteamPostedAt } from './core/steam-date.mjs';
+import {
+  acquireWorkerLock,
+  isWorkerLockActive,
+  releaseWorkerLock,
+} from './core/worker-lock.mjs';
+import { computeWorkerCursor } from './core/worker-progress.mjs';
 
 const DEFAULT_EXPERIENCE_DIR = '00_输入源/50_我是谁/Steam体验记录';
 const DEFAULT_STATE_PATH = '.obsidian/steam-experience-sync/state.json';
@@ -16,8 +32,11 @@ const DEFAULT_PENDING_WRITES_PATH = '.obsidian/steam-experience-sync/pending-wri
 const DEFAULT_REQUEST_DELAY_MS = 1200;
 const DEFAULT_RETRY_AFTER_MS = 60000;
 const DEFAULT_WORKER_COOLDOWN_ON_429_MS = 8 * 60 * 60 * 1000;
-const DEFAULT_WORKER_LOOP_DELAY_MS = 10000;
+const DEFAULT_WORKER_LOOP_DELAY_MS = 60000;
 const SCREENSHOT_LIST_PATH = '/screenshots/';
+
+// Module-level rate limiter reference, set by main() for use in fetchWithBackoff
+let globalRateLimiter = null;
 
 main().catch((error) => {
   console.error('[steam-experience-sync] failed:', error.message);
@@ -29,6 +48,16 @@ async function main() {
   const args = parseArgs(process.argv.slice(2));
   const config = readConfig(args);
 
+  // Load adaptive rate limiter; attach to config so all modes can use it
+  if (config.adaptiveEnabled) {
+    config.rateLimiter = await loadRateLimiterState(
+      config.rateLimiterFile,
+      config.requestDelayMs,
+    );
+    globalRateLimiter = config.rateLimiter;
+    console.error(`Rate limiter: ${formatRateLimiterSummary(config.rateLimiter)}`);
+  }
+
   if (args.stopWorker) {
     await requestWorkerStop(config);
     return;
@@ -39,6 +68,14 @@ async function main() {
   }
   if (args.workerStatus) {
     await printWorkerStatus(config);
+    return;
+  }
+  if (args.workerStatusJson) {
+    await printWorkerStatusJson(config);
+    return;
+  }
+  if (args.workerLogTail) {
+    await printWorkerLog(config);
     return;
   }
   if (args.discover) {
@@ -67,15 +104,25 @@ async function main() {
   }
   if (config.workerLoop) {
     await runWorkerLoop(config, args);
+    await saveRateLimiterIfNeeded(config);
     return;
   }
   if (config.worker) {
     await runWorker(config, args);
+    await saveRateLimiterIfNeeded(config);
     return;
   }
 
   const state = await readState(config.stateFile);
   await runOnce(config, args, state);
+  await saveRateLimiterIfNeeded(config);
+}
+
+async function saveRateLimiterIfNeeded(config) {
+  if (config.adaptiveEnabled && globalRateLimiter) {
+    config.rateLimiter = globalRateLimiter;
+    await saveRateLimiterState(config.rateLimiterFile, globalRateLimiter);
+  }
 }
 
 async function planWrites(config, args) {
@@ -153,8 +200,9 @@ async function collectCandidateItems(config, args, state) {
       if (config.limit !== 'all' && scannedCount >= config.limit) break screenshotPages;
 
       scannedCount += 1;
-      if (scannedCount > 1 && config.requestDelayMs > 0) {
-        await sleep(config.requestDelayMs);
+      if (scannedCount > 1) {
+        const delayMs = getRequestDelay(config);
+        if (delayMs > 0) await sleep(delayMs);
       }
 
       const item = await fetchScreenshotDetail(id);
@@ -196,8 +244,9 @@ async function runDiscovery(config, args) {
       if (config.limit !== 'all' && scannedCount >= config.limit) break screenshotPages;
 
       scannedCount += 1;
-      if (scannedCount > 1 && config.requestDelayMs > 0) {
-        await sleep(config.requestDelayMs);
+      if (scannedCount > 1) {
+        const delayMs = getRequestDelay(config);
+        if (delayMs > 0) await sleep(delayMs);
       }
 
       const item = await fetchScreenshotDetail(id);
@@ -241,6 +290,9 @@ async function runOnce(config, args, state) {
   let lastScannedPage = config.startPage - 1;
   let stoppedByMaxMatches = false;
   let stoppedByStopFile = false;
+  let stoppedByScanLimit = false;
+  const scannedIds = [];
+  const skipDetailIds = new Set((config.skipDetailIds || []).map(String));
 
   screenshotPages:
   for await (const pageResult of collectScreenshotIdPages(config)) {
@@ -253,14 +305,20 @@ async function runOnce(config, args, state) {
       }
       if (seenListIds.has(id)) continue;
       seenListIds.add(id);
+      if (skipDetailIds.has(String(id))) continue;
 
       if (args.sinceId && id === String(args.sinceId)) break screenshotPages;
       if (!config.resync && state.seenPublishedFileIds.includes(id)) continue;
-      if (config.limit !== 'all' && scannedCount >= config.limit) break screenshotPages;
+      if (config.limit !== 'all' && scannedCount >= config.limit) {
+        stoppedByScanLimit = true;
+        break screenshotPages;
+      }
 
       scannedCount += 1;
-      if (scannedCount > 1 && config.requestDelayMs > 0) {
-        await sleep(config.requestDelayMs);
+      scannedIds.push(String(id));
+      if (scannedCount > 1) {
+        const delayMs = getRequestDelay(config);
+        if (delayMs > 0) await sleep(delayMs);
       }
 
       const item = await fetchScreenshotDetail(id);
@@ -296,7 +354,7 @@ async function runOnce(config, args, state) {
 
   if (matchedCount === 0) {
     console.log('No new public Steam screenshots found.');
-    return { processed, matchedCount, scannedCount, lastScannedPage, stoppedByMaxMatches, stoppedByStopFile };
+    return { processed, matchedCount, scannedCount, scannedIds, lastScannedPage, stoppedByMaxMatches, stoppedByStopFile, stoppedByScanLimit };
   }
 
   if (!config.dryRun && processed.length > 0) {
@@ -305,7 +363,7 @@ async function runOnce(config, args, state) {
     await writeState(config.stateFile, state);
   }
 
-  return { processed, matchedCount, scannedCount, lastScannedPage, stoppedByMaxMatches, stoppedByStopFile };
+  return { processed, matchedCount, scannedCount, scannedIds, lastScannedPage, stoppedByMaxMatches, stoppedByStopFile, stoppedByScanLimit };
 }
 
 async function runWorker(config, args) {
@@ -334,35 +392,43 @@ async function runWorker(config, args) {
     return;
   }
 
-  const queue = config.workerAppids.length > 0 ? config.workerAppids : config.appids;
-  if (queue.length === 0) {
-    throw new Error('Worker mode requires STEAM_WORKER_APPIDS, STEAM_APPIDS, --worker-appids, or --appids.');
+  if (config.workerMode === 'feed') {
+    await runFeedWorker(config, args, state, forceRateLimit);
+    return;
   }
 
-  const index = state.worker.nextAppidIndex % queue.length;
-  const appid = String(queue[index]);
-  const appState = state.worker.appids[appid] || { nextPage: 1, imported: 0 };
-  const pageEnd = (appState.nextPage || 1) + config.workerPages - 1;
+  await runAppidWorker(config, args, state, forceRateLimit);
+}
+
+async function runFeedWorker(config, args, state, forceRateLimit) {
+  const feedState = state.worker.feed || { nextPage: 1, imported: 0 };
+  const startPage = feedState.nextPage || 1;
+  const checkedIds = Number(feedState.checkedPage) === Number(startPage)
+    ? (feedState.checkedIds || []).map(String)
+    : [];
+  const pageEnd = startPage + config.workerPages - 1;
   const workerConfig = {
     ...config,
-    appids: [appid],
+    appids: [],
     pages: config.workerPages,
-    startPage: appState.nextPage || 1,
-    limit: 'all',
+    startPage,
+    limit: config.workerMaxDetailScans,
     maxMatches: config.workerBatchSize,
     maxGames: 'all',
     resync: false,
+    skipDetailIds: checkedIds,
   };
 
-  console.log(`Worker batch: appid ${appid}, pages ${workerConfig.startPage}-${pageEnd}, max ${workerConfig.maxMatches} screenshot(s).`);
+  console.log(`Worker batch: screenshot feed, pages ${workerConfig.startPage}-${pageEnd}, max ${workerConfig.maxMatches} match(es), max ${workerConfig.limit} detail check(s).`);
 
   await writeWorkerLog(config, {
     level: 'info',
     event: 'worker_start',
-    appid,
+    mode: 'feed',
     startPage: workerConfig.startPage,
     pages: workerConfig.pages,
     batchSize: workerConfig.maxMatches,
+    maxDetailScans: workerConfig.limit,
     dryRun: config.dryRun,
   });
 
@@ -372,18 +438,111 @@ async function runWorker(config, args) {
     }
 
     const summary = await runOnce(workerConfig, args, state);
-    const nextPage = summary.stoppedByMaxMatches
-      ? Math.max(1, summary.lastScannedPage)
-      : Math.max(1, summary.lastScannedPage + 1);
+    const cursor = computeWorkerCursor({ startPage, checkedIds, summary });
+
+    state.worker.feed = {
+      ...feedState,
+      nextPage: cursor.nextPage,
+      imported: Number(feedState.imported || 0) + summary.processed.length,
+      lastRunAt: new Date().toISOString(),
+      lastMatchedCount: summary.matchedCount,
+      lastProcessedCount: summary.processed.length,
+      lastDetailScannedCount: summary.scannedCount,
+      lastScannedPage: summary.lastScannedPage,
+      checkedPage: cursor.checkedPage,
+      checkedIds: cursor.checkedIds,
+    };
+    state.worker.lastRunAt = new Date().toISOString();
+    state.worker = {
+      ...resetRateFailures(state.worker),
+      lastError: null,
+      consecutiveFailures: 0,
+    };
+    if (!config.dryRun) await writeState(config.stateFile, state);
+
+    await writeWorkerLog(config, {
+      level: 'info',
+      event: 'worker_done',
+      mode: 'feed',
+      processed: summary.processed.length,
+      matched: summary.matchedCount,
+      detailScanned: summary.scannedCount,
+      nextPage: cursor.nextPage,
+      stoppedByStopFile: summary.stoppedByStopFile,
+      stoppedByScanLimit: summary.stoppedByScanLimit,
+    });
+    console.log(`Worker done: screenshot feed, wrote ${summary.processed.length}, matched ${summary.matchedCount}, next page ${cursor.nextPage}.`);
+  } catch (error) {
+    await handleWorkerFailure(config, state, error, { mode: 'feed' });
+  }
+}
+
+async function runAppidWorker(config, args, state, forceRateLimit) {
+  let queue = config.workerAppids.length > 0 ? config.workerAppids : config.appids;
+  if (queue.length === 0) {
+    const discovery = await readDiscoveryIndex(config.discoveryFile);
+    queue = Object.keys(discovery.games || {});
+    if (queue.length === 0) {
+      throw new Error(
+        'No worker appids configured and discovery index is empty. ' +
+        'Run --discover first to build the index, or configure STEAM_WORKER_APPIDS.',
+      );
+    }
+    console.log(`Auto-loaded ${queue.length} appid(s) from discovery index.`);
+  }
+
+  const index = state.worker.nextAppidIndex % queue.length;
+  const appid = String(queue[index]);
+  const appState = state.worker.appids[appid] || { nextPage: 1, imported: 0 };
+  const startPage = appState.nextPage || 1;
+  const checkedIds = Number(appState.checkedPage) === Number(startPage)
+    ? (appState.checkedIds || []).map(String)
+    : [];
+  const pageEnd = startPage + config.workerPages - 1;
+  const workerConfig = {
+    ...config,
+    appids: [appid],
+    pages: config.workerPages,
+    startPage,
+    limit: config.workerMaxDetailScans,
+    maxMatches: config.workerBatchSize,
+    maxGames: 'all',
+    resync: false,
+    skipDetailIds: checkedIds,
+  };
+
+  console.log(`Worker batch: appid ${appid}, pages ${workerConfig.startPage}-${pageEnd}, max ${workerConfig.maxMatches} match(es), max ${workerConfig.limit} detail check(s).`);
+
+  await writeWorkerLog(config, {
+    level: 'info',
+    event: 'worker_start',
+    appid,
+    startPage: workerConfig.startPage,
+    pages: workerConfig.pages,
+    batchSize: workerConfig.maxMatches,
+    maxDetailScans: workerConfig.limit,
+    dryRun: config.dryRun,
+  });
+
+  try {
+    if (forceRateLimit) {
+      throw new HttpStatusError(429, 'Forced Rate Limit', 'STEAM_TEST_FORCE_429');
+    }
+
+    const summary = await runOnce(workerConfig, args, state);
+    const cursor = computeWorkerCursor({ startPage, checkedIds, summary });
 
     state.worker.appids[appid] = {
       ...appState,
-      nextPage,
+      nextPage: cursor.nextPage,
       imported: Number(appState.imported || 0) + summary.processed.length,
       lastRunAt: new Date().toISOString(),
       lastMatchedCount: summary.matchedCount,
       lastProcessedCount: summary.processed.length,
+      lastDetailScannedCount: summary.scannedCount,
       lastScannedPage: summary.lastScannedPage,
+      checkedPage: cursor.checkedPage,
+      checkedIds: cursor.checkedIds,
     };
     state.worker.nextAppidIndex = (index + 1) % queue.length;
     state.worker.lastRunAt = new Date().toISOString();
@@ -400,73 +559,98 @@ async function runWorker(config, args) {
       appid,
       processed: summary.processed.length,
       matched: summary.matchedCount,
-      nextPage,
+      detailScanned: summary.scannedCount,
+      nextPage: cursor.nextPage,
       stoppedByStopFile: summary.stoppedByStopFile,
+      stoppedByScanLimit: summary.stoppedByScanLimit,
     });
-    console.log(`Worker done: appid ${appid}, wrote ${summary.processed.length}, matched ${summary.matchedCount}, next page ${nextPage}.`);
+    console.log(`Worker done: appid ${appid}, wrote ${summary.processed.length}, matched ${summary.matchedCount}, next page ${cursor.nextPage}.`);
     console.log(`Next worker run will start with appid ${queue[state.worker.nextAppidIndex]}.`);
   } catch (error) {
-    if (error.status === 429) {
-      state.worker = recordRateFailure(state.worker, new Date().toISOString());
-      const cooldownMultiplier = Math.min(Number(state.worker.consecutiveRateFailures || 1), 3);
-      state.worker.cooldownUntil = new Date(Date.now() + config.workerCooldownOn429Ms * cooldownMultiplier).toISOString();
-      if (state.worker.pausedByRateLimit && !config.dryRun) {
-        await requestWorkerStop(config);
-      }
-    }
-    state.worker.lastError = {
-      message: error.message,
-      status: error.status || null,
-      at: new Date().toISOString(),
-    };
-    state.worker.consecutiveFailures = Number(state.worker.consecutiveFailures || 0) + 1;
-    if (!config.dryRun) await writeState(config.stateFile, state);
-
-    await writeWorkerLog(config, {
-      level: 'error',
-      event: 'worker_failed',
-      appid,
-      status: error.status || null,
-      message: error.message,
-      cooldownUntil: state.worker.cooldownUntil || null,
-      consecutiveRateFailures: state.worker.consecutiveRateFailures || 0,
-      pausedByRateLimit: Boolean(state.worker.pausedByRateLimit),
-    });
-
-    if (error.status === 429) {
-      const pauseMessage = state.worker.pausedByRateLimit ? ' Repeated failures reached 3; worker stop requested.' : '';
-      console.warn(`Worker stopped on 429; cooldown until ${formatBeijingDateTime(state.worker.cooldownUntil)}.${pauseMessage}`);
-      return;
-    }
-    throw error;
+    await handleWorkerFailure(config, state, error, { mode: 'appid', appid });
   }
 }
 
+async function handleWorkerFailure(config, state, error, context) {
+  if (error.status === 429) {
+    state.worker = recordRateFailure(state.worker, new Date().toISOString());
+    const cooldownMultiplier = Math.min(Number(state.worker.consecutiveRateFailures || 1), 3);
+    state.worker.cooldownUntil = new Date(Date.now() + config.workerCooldownOn429Ms * cooldownMultiplier).toISOString();
+    if (state.worker.pausedByRateLimit && !config.dryRun) {
+      await requestWorkerStop(config);
+    }
+  }
+  state.worker.lastError = {
+    message: error.message,
+    status: error.status || null,
+    ...serializeErrorDetails(error),
+    at: new Date().toISOString(),
+  };
+  state.worker.consecutiveFailures = Number(state.worker.consecutiveFailures || 0) + 1;
+  if (!config.dryRun) await writeState(config.stateFile, state);
+
+  await writeWorkerLog(config, {
+    level: 'error',
+    event: 'worker_failed',
+    ...context,
+    status: error.status || null,
+    message: error.message,
+    error: serializeErrorDetails(error),
+    cooldownUntil: state.worker.cooldownUntil || null,
+    consecutiveRateFailures: state.worker.consecutiveRateFailures || 0,
+    pausedByRateLimit: Boolean(state.worker.pausedByRateLimit),
+  });
+
+  if (error.status === 429) {
+    const pauseMessage = state.worker.pausedByRateLimit ? ' Repeated failures reached 3; worker stop requested.' : '';
+    console.warn(`Worker stopped on 429; cooldown until ${formatBeijingDateTime(state.worker.cooldownUntil)}.${pauseMessage}`);
+    return;
+  }
+  throw error;
+}
+
 async function runWorkerLoop(config, args) {
+  const lock = await acquireWorkerLock(config.workerLockFile);
+  if (!lock.acquired) {
+    const message = `Worker loop already running; lock file active at ${config.workerLockFile}`;
+    console.log(message);
+    await writeWorkerLog(config, {
+      level: 'warn',
+      event: 'worker_lock_active',
+      lockFile: config.workerLockFile,
+      existing: lock.existing || null,
+    });
+    return;
+  }
+
   console.log(`Worker loop started. Delay between rounds: ${Math.round(config.workerLoopDelayMs / 1000)}s.`);
   console.log('Use `npm.cmd run worker:stop` in another terminal to stop after the current step.');
 
-  while (true) {
-    await runWorker({ ...config, worker: true }, args);
+  try {
+    while (true) {
+      await runWorker({ ...config, worker: true }, args);
 
-    if (config.dryRun) {
-      console.log('Worker loop dry-run stops after one round.');
-      return;
-    }
-    if (fsSync.existsSync(config.workerStopFile)) {
-      console.log(`Worker loop stopped by ${config.workerStopFile}`);
-      return;
-    }
+      if (config.dryRun) {
+        console.log('Worker loop dry-run stops after one round.');
+        return;
+      }
+      if (fsSync.existsSync(config.workerStopFile)) {
+        console.log(`Worker loop stopped by ${config.workerStopFile}`);
+        return;
+      }
 
-    const state = await readState(config.stateFile);
-    const worker = normalizeWorkerState(state.worker);
-    if (worker.cooldownUntil && Date.parse(worker.cooldownUntil) > Date.now()) {
-      console.log(`Worker loop paused by cooldown until ${formatBeijingDateTime(worker.cooldownUntil)}`);
-      return;
-    }
+      const state = await readState(config.stateFile);
+      const worker = normalizeWorkerState(state.worker);
+      if (worker.cooldownUntil && Date.parse(worker.cooldownUntil) > Date.now()) {
+        console.log(`Worker loop paused by cooldown until ${formatBeijingDateTime(worker.cooldownUntil)}`);
+        return;
+      }
 
-    console.log(`Worker loop waiting ${Math.round(config.workerLoopDelayMs / 1000)}s before next round...`);
-    await sleep(config.workerLoopDelayMs);
+      console.log(`Worker loop waiting ${Math.round(config.workerLoopDelayMs / 1000)}s before next round...`);
+      await sleep(config.workerLoopDelayMs);
+    }
+  } finally {
+    await releaseWorkerLock(config.workerLockFile);
   }
 }
 
@@ -489,15 +673,30 @@ async function clearWorkerStop(config) {
 async function printWorkerStatus(config) {
   const state = await readState(config.stateFile);
   const worker = normalizeWorkerState(state.worker);
-  const queue = config.workerAppids.length > 0 ? config.workerAppids : config.appids;
+  let queue = [];
+  if (config.workerMode === 'appid') {
+    queue = config.workerAppids.length > 0 ? config.workerAppids : config.appids;
+  }
+  if (config.workerMode === 'appid' && queue.length === 0) {
+    try {
+      const discovery = await readDiscoveryIndex(config.discoveryFile);
+      queue = Object.keys(discovery.games || {});
+    } catch { /* discovery file may not exist */ }
+  }
   const nextAppid = queue.length > 0 ? queue[worker.nextAppidIndex % queue.length] : '(not configured)';
   const stopExists = fsSync.existsSync(config.workerStopFile);
+  const lockExists = await isWorkerLockActive(config.workerLockFile);
   const cooldownActive = worker.cooldownUntil ? Date.parse(worker.cooldownUntil) > Date.now() : false;
+  const feed = worker.feed || {};
 
   console.log('Worker status');
+  console.log(`  mode: ${config.workerMode}`);
   console.log(`  queue: ${queue.length > 0 ? queue.join(',') : '(empty)'}`);
+  console.log(`  feed next page: ${feed.nextPage || 1}`);
+  console.log(`  feed imported: ${feed.imported || 0}`);
   console.log(`  next appid: ${nextAppid}`);
   console.log(`  stop file: ${stopExists ? 'present' : 'absent'}`);
+  console.log(`  worker lock: ${lockExists ? 'active' : 'inactive'}`);
   console.log(`  timezone: 北京时间`);
   console.log(`  cooldown: ${cooldownActive ? formatBeijingDateTime(worker.cooldownUntil) : 'inactive'}`);
   console.log(`  rate limit failures: ${worker.consecutiveRateFailures}`);
@@ -507,6 +706,76 @@ async function printWorkerStatus(config) {
   for (const appid of queue) {
     const item = worker.appids[String(appid)] || {};
     console.log(`  appid ${appid}: nextPage=${item.nextPage || 1}, imported=${item.imported || 0}, lastMatched=${item.lastMatchedCount ?? '(none)'}`);
+  }
+}
+
+async function printWorkerStatusJson(config) {
+  const state = await readState(config.stateFile);
+  const worker = normalizeWorkerState(state.worker);
+  let queue = [];
+  if (config.workerMode === 'appid') {
+    queue = config.workerAppids.length > 0 ? config.workerAppids : config.appids;
+  }
+  if (config.workerMode === 'appid' && queue.length === 0) {
+    try {
+      const discovery = await readDiscoveryIndex(config.discoveryFile);
+      queue = Object.keys(discovery.games || {});
+    } catch { /* discovery file may not exist */ }
+  }
+  const nextAppid = queue.length > 0 ? queue[worker.nextAppidIndex % queue.length] : '';
+  const stopExists = fsSync.existsSync(config.workerStopFile);
+  const lockExists = await isWorkerLockActive(config.workerLockFile);
+  const cooldownActive = worker.cooldownUntil ? Date.parse(worker.cooldownUntil) > Date.now() : false;
+
+  const appProgress = queue.map((appid) => {
+    const item = worker.appids[String(appid)] || {};
+    return {
+      appid: String(appid),
+      nextPage: item.nextPage || 1,
+      imported: item.imported || 0,
+      lastMatchedCount: item.lastMatchedCount ?? null,
+      lastProcessedCount: item.lastProcessedCount ?? null,
+    };
+  });
+  const feed = worker.feed || {};
+
+  console.log(JSON.stringify({
+    workerMode: config.workerMode,
+    queue: queue.map(String),
+    nextAppid,
+    stopFilePresent: stopExists,
+    workerLockActive: lockExists,
+    cooldownActive,
+    cooldownUntil: worker.cooldownUntil || null,
+    cooldownUntilBeijing: cooldownActive ? formatBeijingDateTime(worker.cooldownUntil) : null,
+    rateLimitFailures: worker.consecutiveRateFailures || 0,
+    pausedByRateLimit: Boolean(worker.pausedByRateLimit),
+    lastRunAt: worker.lastRunAt || null,
+    lastRunAtBeijing: worker.lastRunAt ? formatBeijingDateTime(worker.lastRunAt) : null,
+    lastError: worker.lastError?.message || null,
+    appProgress,
+    feedProgress: {
+      nextPage: feed.nextPage || 1,
+      imported: feed.imported || 0,
+      lastMatchedCount: feed.lastMatchedCount ?? null,
+      lastProcessedCount: feed.lastProcessedCount ?? null,
+      lastDetailScannedCount: feed.lastDetailScannedCount ?? null,
+    },
+    configuredBatchSize: config.workerBatchSize,
+    configuredPages: config.workerPages,
+    configuredMaxDetailScans: config.workerMaxDetailScans,
+    configuredLoopDelayMs: config.workerLoopDelayMs,
+  }));
+}
+
+async function printWorkerLog(config) {
+  try {
+    const raw = await fs.readFile(config.workerLogFile, 'utf8');
+    const lines = raw.split(/\r?\n/).filter(Boolean).slice(-80);
+    console.log(lines.join('\n'));
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+    console.log('');
   }
 }
 
@@ -523,6 +792,10 @@ function readConfig(args) {
   const requestDelayMs = parseNonNegativeInteger(args.requestDelayMs || process.env.STEAM_REQUEST_DELAY_MS || DEFAULT_REQUEST_DELAY_MS);
   const workerLogPath = args.workerLog || process.env.STEAM_WORKER_LOG || '.obsidian/steam-experience-sync/worker.log';
   const workerStopPath = args.workerStop || process.env.STEAM_WORKER_STOP_FILE || '.obsidian/steam-experience-sync/stop-worker';
+  const workerLockPath = args.workerLock || process.env.STEAM_WORKER_LOCK_FILE || '.obsidian/steam-experience-sync/worker.lock';
+  const rateLimiterPath = args.rateLimiterFile || process.env.STEAM_RATE_LIMITER_FILE || '.obsidian/steam-experience-sync/rate-limiter.json';
+  const adaptiveEnabled = !(args.noAdaptive || process.env.STEAM_NO_ADAPTIVE_RATE === '1');
+  const workerMode = parseWorkerMode(args.workerMode || process.env.STEAM_WORKER_MODE || 'feed');
 
   return {
     steamId,
@@ -542,16 +815,35 @@ function readConfig(args) {
     appids: parseList(args.appid || args.appids || process.env.STEAM_APPIDS || ''),
     worker: Boolean(args.worker),
     workerLoop: Boolean(args.workerLoop),
+    workerMode,
     workerAppids: parseList(args.workerAppids || process.env.STEAM_WORKER_APPIDS || process.env.STEAM_SYNC_APPIDS || ''),
     workerBatchSize: parseCount(args.workerBatchSize || process.env.STEAM_WORKER_BATCH_SIZE || 5),
     workerPages: parseCount(args.workerPages || process.env.STEAM_WORKER_PAGES || 3),
+    workerMaxDetailScans: parsePositiveInteger(args.workerMaxDetailScans || process.env.STEAM_WORKER_MAX_DETAIL_SCANS, 3),
     workerCooldownOn429Ms: parseNonNegativeInteger(args.workerCooldownOn429Ms || process.env.STEAM_WORKER_COOLDOWN_ON_429_MS || DEFAULT_WORKER_COOLDOWN_ON_429_MS),
     workerLoopDelayMs: parseNonNegativeInteger(args.workerLoopDelayMs || process.env.STEAM_WORKER_LOOP_DELAY_MS || DEFAULT_WORKER_LOOP_DELAY_MS),
     workerLogFile: path.resolve(vaultDir, fromVaultPath(workerLogPath)),
     workerStopFile: path.resolve(vaultDir, fromVaultPath(workerStopPath)),
+    workerLockFile: path.resolve(vaultDir, fromVaultPath(workerLockPath)),
+    rateLimiterFile: path.resolve(vaultDir, fromVaultPath(rateLimiterPath)),
+    adaptiveEnabled,
     resync: Boolean(args.resync),
     dryRun: Boolean(args.dryRun),
   };
+}
+
+function getRequestDelay(config) {
+  if (config.adaptiveEnabled && config.rateLimiter) {
+    return computeRequestDelay(config.rateLimiter);
+  }
+  return config.requestDelayMs;
+}
+
+function getPageDelay(config) {
+  if (config.adaptiveEnabled && config.rateLimiter) {
+    return computePageDelay(config.rateLimiter);
+  }
+  return config.pageDelayMs;
 }
 
 function parseArgs(argv) {
@@ -565,6 +857,9 @@ function parseArgs(argv) {
     else if (arg === '--stop-worker') out.stopWorker = true;
     else if (arg === '--clear-worker-stop') out.clearWorkerStop = true;
     else if (arg === '--worker-status') out.workerStatus = true;
+    else if (arg === '--worker-status-json') out.workerStatusJson = true;
+    else if (arg === '--worker-log-tail') out.workerLogTail = true;
+    else if (arg === '--no-adaptive') out.noAdaptive = true;
     else if (arg === '--discover') out.discover = true;
     else if (arg === '--read-discovery') out.readDiscovery = true;
     else if (arg === '--read-pending') out.readPending = true;
@@ -585,6 +880,7 @@ function parseArgs(argv) {
     else if (arg === '--appid') out.appid = argv[++i];
     else if (arg === '--appids') out.appids = argv[++i];
     else if (arg === '--worker-appids') out.workerAppids = argv[++i];
+    else if (arg === '--worker-mode') out.workerMode = argv[++i];
     else if (arg === '--pages') out.pages = argv[++i];
     else if (arg === '--start-page') out.startPage = argv[++i];
     else if (arg === '--limit') out.limit = argv[++i];
@@ -592,10 +888,13 @@ function parseArgs(argv) {
     else if (arg === '--max-games') out.maxGames = argv[++i];
     else if (arg === '--worker-batch-size') out.workerBatchSize = argv[++i];
     else if (arg === '--worker-pages') out.workerPages = argv[++i];
+    else if (arg === '--worker-max-detail-scans') out.workerMaxDetailScans = argv[++i];
     else if (arg === '--worker-cooldown-on-429-ms') out.workerCooldownOn429Ms = argv[++i];
     else if (arg === '--worker-loop-delay-ms') out.workerLoopDelayMs = argv[++i];
     else if (arg === '--worker-log') out.workerLog = argv[++i];
     else if (arg === '--worker-stop-file') out.workerStop = argv[++i];
+    else if (arg === '--worker-lock-file') out.workerLock = argv[++i];
+    else if (arg === '--rate-limiter-file') out.rateLimiterFile = argv[++i];
     else if (arg === '--request-delay-ms') out.requestDelayMs = argv[++i];
     else if (arg === '--page-delay-ms') out.pageDelayMs = argv[++i];
     else if (arg === '--since-id') out.sinceId = argv[++i];
@@ -622,6 +921,7 @@ Options:
   --stop-worker      Create stop file so future worker runs exit immediately
     --clear-worker-stop Remove worker stop file
   --worker-status    Print worker queue, page, cooldown, and stop status
+  --worker-log-tail  Print recent worker log lines
   --discover         Scan public screenshots and update discovered-games index only
   --read-discovery   Print discovered games index as JSON
   --read-pending     Print pending write queue as JSON
@@ -639,6 +939,7 @@ Options:
   --appid ID         Only write screenshots from one Steam appid
   --appids IDS       Only write screenshots from comma-separated Steam appids
   --worker-appids IDS Appid queue for worker mode
+  --worker-mode MODE feed or appid, default feed
   --pages N          Screenshot list pages to scan
   --start-page N     Screenshot list page to start from
   --limit N          Max new screenshots to process
@@ -646,10 +947,14 @@ Options:
   --max-games N      Auto-select up to N games when --appid/--appids is not set
   --worker-batch-size N Stop a worker run after N matching screenshots, default 5
   --worker-pages N   Screenshot list pages per worker run, default 3
+  --worker-max-detail-scans N Max screenshot detail pages checked per worker run, default 3
   --worker-cooldown-on-429-ms N Cooldown after 429, default 8 hours
-  --worker-loop-delay-ms N Delay between worker loop rounds, default 10s
+  --worker-loop-delay-ms N Delay between worker loop rounds, default 60s
   --worker-log PATH  Vault-relative worker log path
   --worker-stop-file PATH Vault-relative worker stop file
+  --worker-lock-file PATH Vault-relative worker lock file
+  --rate-limiter-file PATH Vault-relative adaptive limiter state path
+  --no-adaptive      Disable adaptive rate limiter for this run
   --request-delay-ms Delay between screenshot detail requests, default 1200
   --page-delay-ms    Delay between screenshot list page requests, default request delay
   --since-id ID      Only process screenshots newer than this id in the current list
@@ -662,8 +967,9 @@ async function* collectScreenshotIdPages(config) {
   const startPage = config.startPage || 1;
   const pageLimit = allPages ? 200 : startPage + config.pages - 1;
   for (let page = startPage; page <= pageLimit; page += 1) {
-    if (page > startPage && config.pageDelayMs > 0) {
-      await sleep(config.pageDelayMs);
+    if (page > startPage) {
+      const delayMs = getPageDelay(config);
+      if (delayMs > 0) await sleep(delayMs);
     }
 
     const url = `https://steamcommunity.com/profiles/${config.steamId}${SCREENSHOT_LIST_PATH}?p=${page}&sort=newest&l=english`;
@@ -900,6 +1206,7 @@ function normalizeWorkerState(value) {
     lastRateFailureAt: value?.lastRateFailureAt || null,
     pausedByRateLimit: Boolean(value?.pausedByRateLimit),
     appids: value?.appids && typeof value.appids === 'object' ? value.appids : {},
+    feed: value?.feed && typeof value.feed === 'object' ? value.feed : {},
   };
 }
 
@@ -962,13 +1269,38 @@ async function imageExists(url) {
 async function fetchWithBackoff(url, options = {}, settings = {}) {
   const maxAttempts = settings.maxAttempts ?? 3;
   const throwOnError = settings.throwOnError ?? true;
+  const networkRetryAfterMs = settings.networkRetryAfterMs ?? 5000;
   let lastResponse = null;
+  let lastError = null;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-    const response = await fetch(url, options);
-    if (response.ok) return response;
+    let response;
+    try {
+      response = await fetch(url, options);
+    } catch (error) {
+      lastError = error;
+      if (attempt === maxAttempts) break;
+
+      const waitMs = networkRetryAfterMs * attempt;
+      console.warn(`Steam request failed (${error.message}); waiting ${Math.round(waitMs / 1000)}s before retry ${attempt + 1}/${maxAttempts}.`);
+      await sleep(waitMs);
+      continue;
+    }
+
+    if (response.ok) {
+      if (globalRateLimiter) globalRateLimiter = recordSuccess(globalRateLimiter);
+      return response;
+    }
 
     lastResponse = response;
+    if (globalRateLimiter) {
+      if (response.status === 429) {
+        globalRateLimiter = record429(globalRateLimiter);
+      } else if (shouldRetry(response.status)) {
+        globalRateLimiter = record5xx(globalRateLimiter);
+      }
+    }
+
     if (!shouldRetry(response.status) || attempt === maxAttempts) break;
 
     const waitMs = retryAfterMs(response) ?? DEFAULT_RETRY_AFTER_MS * attempt;
@@ -977,9 +1309,20 @@ async function fetchWithBackoff(url, options = {}, settings = {}) {
   }
 
   if (throwOnError) {
+    if (lastError) throw new SteamNetworkError(lastError, url);
     throw new HttpStatusError(lastResponse.status, lastResponse.statusText, url);
   }
   return lastResponse;
+}
+
+class SteamNetworkError extends Error {
+  constructor(error, url) {
+    super(`${error.message} for ${url}`);
+    this.name = 'SteamNetworkError';
+    this.status = null;
+    this.url = url;
+    this.cause = error;
+  }
 }
 
 class HttpStatusError extends Error {
@@ -1008,6 +1351,18 @@ function defaultHeaders() {
   return {
     'User-Agent': 'steam-experience-sync/0.1 (+https://github.com/)',
     'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+  };
+}
+
+function serializeErrorDetails(error) {
+  const cause = error?.cause || {};
+  return {
+    name: error?.name || null,
+    code: error?.code || cause.code || null,
+    errno: error?.errno || cause.errno || null,
+    syscall: error?.syscall || cause.syscall || null,
+    hostname: error?.hostname || cause.hostname || null,
+    causeMessage: cause.message || null,
   };
 }
 
@@ -1091,6 +1446,15 @@ function parseCount(value) {
   if (value === 'all') return 'all';
   const number = Number(value);
   return Number.isFinite(number) && number > 0 ? number : 1;
+}
+
+function parsePositiveInteger(value, fallback) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? Math.floor(number) : fallback;
+}
+
+function parseWorkerMode(value) {
+  return value === 'appid' ? 'appid' : 'feed';
 }
 
 function parseList(value) {

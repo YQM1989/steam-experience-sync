@@ -5,6 +5,42 @@ export type CommandResult = {
   message: string;
 };
 
+export type WorkerAppProgress = {
+  appid: string;
+  nextPage: number;
+  imported: number;
+  lastMatchedCount: number | null;
+  lastProcessedCount: number | null;
+};
+
+export type WorkerStatus = {
+  workerMode: 'feed' | 'appid';
+  queue: string[];
+  nextAppid: string;
+  stopFilePresent: boolean;
+  workerLockActive: boolean;
+  cooldownActive: boolean;
+  cooldownUntil: string | null;
+  cooldownUntilBeijing: string | null;
+  rateLimitFailures: number;
+  pausedByRateLimit: boolean;
+  lastRunAt: string | null;
+  lastRunAtBeijing: string | null;
+  lastError: string | null;
+  appProgress: WorkerAppProgress[];
+  feedProgress: {
+    nextPage: number;
+    imported: number;
+    lastMatchedCount: number | null;
+    lastProcessedCount: number | null;
+    lastDetailScannedCount: number | null;
+  };
+  configuredBatchSize: number;
+  configuredPages: number;
+  configuredMaxDetailScans: number;
+  configuredLoopDelayMs: number;
+};
+
 export type GuiConfig = {
   steamId: string;
   steamApiKey: string;
@@ -13,6 +49,9 @@ export type GuiConfig = {
   previewMode: string;
   requestDelayMs: number;
   pageDelayMs: number;
+  workerLoopDelayMs: number;
+  workerMaxDetailScans: number;
+  workerMode: 'feed' | 'appid';
 };
 
 export type PendingWrite = {
@@ -43,8 +82,9 @@ export type DiscoveryIndex = {
   games: Record<string, DiscoveredGame>;
 };
 
-export async function getStatus(): Promise<string> {
-  return invoke<string>('get_status');
+export async function getStatus(): Promise<WorkerStatus> {
+  const raw = await invoke<string>('get_status');
+  return JSON.parse(raw) as WorkerStatus;
 }
 
 export async function getLogs(): Promise<string> {

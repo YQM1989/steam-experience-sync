@@ -1,8 +1,12 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use std::fs;
+use std::io::BufRead;
+use std::io::BufReader;
 use std::io::Write;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
+use tauri::Emitter;
 
 #[derive(Serialize)]
 pub struct CommandResult {
@@ -47,13 +51,119 @@ fn is_project_root(path: &Path) -> bool {
     path.join("src").join("index.mjs").exists()
 }
 
+#[derive(Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GuiConfig {
+    steam_id: Option<String>,
+    steam_api_key: Option<String>,
+    vault_dir: Option<String>,
+    experience_dir: Option<String>,
+    state_path: Option<String>,
+    worker_log_path: Option<String>,
+    stop_worker_path: Option<String>,
+    worker_mode: Option<String>,
+    request_delay_ms: Option<u64>,
+    page_delay_ms: Option<u64>,
+    worker_loop_delay_ms: Option<u64>,
+    worker_pages: Option<u64>,
+    worker_max_screenshots: Option<u64>,
+    worker_max_detail_scans: Option<u64>,
+}
+
+fn gui_config_env(root: &Path) -> Result<Vec<(&'static str, String)>, String> {
+    let file_path = root.join(".steam-experience-sync").join("config.json");
+    if !file_path.exists() {
+        return Ok(Vec::new());
+    }
+
+    let raw = fs::read_to_string(file_path).map_err(|error| error.to_string())?;
+    let config: GuiConfig = serde_json::from_str(&raw).map_err(|error| error.to_string())?;
+    let mut envs = Vec::new();
+
+    push_string_env(&mut envs, "STEAM_ID", config.steam_id);
+    push_string_env(&mut envs, "STEAM_API_KEY", config.steam_api_key);
+    push_string_env(&mut envs, "OBSIDIAN_VAULT_DIR", config.vault_dir);
+    push_string_env(&mut envs, "STEAM_EXPERIENCE_DIR", config.experience_dir);
+    push_string_env(&mut envs, "STEAM_SYNC_STATE", config.state_path);
+    push_string_env(&mut envs, "STEAM_WORKER_LOG", config.worker_log_path);
+    push_string_env(&mut envs, "STEAM_WORKER_STOP_FILE", config.stop_worker_path);
+    push_string_env(&mut envs, "STEAM_WORKER_MODE", config.worker_mode);
+    push_number_env_at_least(
+        &mut envs,
+        "STEAM_REQUEST_DELAY_MS",
+        config.request_delay_ms,
+        30_000,
+    );
+    push_number_env_at_least(
+        &mut envs,
+        "STEAM_PAGE_DELAY_MS",
+        config.page_delay_ms,
+        60_000,
+    );
+    push_number_env_at_least(
+        &mut envs,
+        "STEAM_WORKER_LOOP_DELAY_MS",
+        config.worker_loop_delay_ms,
+        60_000,
+    );
+    push_number_env(&mut envs, "STEAM_WORKER_PAGES", config.worker_pages);
+    push_number_env(
+        &mut envs,
+        "STEAM_WORKER_BATCH_SIZE",
+        config.worker_max_screenshots,
+    );
+    push_number_env(
+        &mut envs,
+        "STEAM_WORKER_MAX_DETAIL_SCANS",
+        config.worker_max_detail_scans,
+    );
+
+    Ok(envs)
+}
+
+fn apply_gui_config_env(command: &mut Command, root: &Path) -> Result<(), String> {
+    for (key, value) in gui_config_env(root)? {
+        command.env(key, value);
+    }
+    Ok(())
+}
+
+fn push_string_env(
+    envs: &mut Vec<(&'static str, String)>,
+    key: &'static str,
+    value: Option<String>,
+) {
+    if let Some(value) = value {
+        if !value.trim().is_empty() {
+            envs.push((key, value));
+        }
+    }
+}
+
+fn push_number_env(envs: &mut Vec<(&'static str, String)>, key: &'static str, value: Option<u64>) {
+    if let Some(value) = value {
+        envs.push((key, value.to_string()));
+    }
+}
+
+fn push_number_env_at_least(
+    envs: &mut Vec<(&'static str, String)>,
+    key: &'static str,
+    value: Option<u64>,
+    minimum: u64,
+) {
+    if let Some(value) = value {
+        envs.push((key, value.max(minimum).to_string()));
+    }
+}
+
 fn run_node(args: &[&str]) -> Result<String, String> {
     let root = project_root()?;
-    let output = Command::new("node")
-        .args(args)
-        .current_dir(root)
-        .output()
-        .map_err(|error| error.to_string())?;
+    let mut command = Command::new("node");
+    command.args(args).current_dir(&root);
+    apply_gui_config_env(&mut command, &root)?;
+
+    let output = command.output().map_err(|error| error.to_string())?;
 
     if output.status.success() {
         Ok(String::from_utf8_lossy(&output.stdout).to_string())
@@ -70,8 +180,15 @@ fn run_node(args: &[&str]) -> Result<String, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::find_project_root_from;
+    use super::{find_project_root_from, gui_config_env};
     use std::fs;
+
+    fn env_value(envs: &[(&'static str, String)], name: &str) -> String {
+        envs.iter()
+            .find(|(key, _)| *key == name)
+            .map(|(_, value)| value.clone())
+            .unwrap()
+    }
 
     #[test]
     fn finds_project_root_from_tauri_release_directory() {
@@ -88,40 +205,157 @@ mod tests {
 
         assert_eq!(found, root);
     }
+
+    #[test]
+    fn maps_gui_config_to_worker_environment() {
+        let root = std::env::temp_dir().join(format!(
+            "steam-experience-sync-config-test-{}",
+            std::process::id()
+        ));
+        let config_dir = root.join(".steam-experience-sync");
+        fs::create_dir_all(&config_dir).unwrap();
+        fs::write(
+            config_dir.join("config.json"),
+            r#"{
+              "steamId": "76561198119055866",
+              "steamApiKey": "test-key",
+              "vaultDir": "D:\\YQM-Obsidian",
+              "experienceDir": "00_input/Steam",
+              "statePath": ".obsidian/steam-experience-sync/state.json",
+              "workerLogPath": ".obsidian/steam-experience-sync/worker.log",
+              "stopWorkerPath": ".obsidian/steam-experience-sync/stop-worker",
+              "workerMode": "feed",
+              "requestDelayMs": 30000,
+              "pageDelayMs": 60000,
+              "workerLoopDelayMs": 60000,
+              "workerPages": 1,
+              "workerMaxScreenshots": 1,
+              "workerMaxDetailScans": 3
+            }"#,
+        )
+        .unwrap();
+
+        let envs = gui_config_env(&root).unwrap();
+
+        assert_eq!(env_value(&envs, "STEAM_ID"), "76561198119055866");
+        assert_eq!(env_value(&envs, "STEAM_API_KEY"), "test-key");
+        assert_eq!(env_value(&envs, "OBSIDIAN_VAULT_DIR"), "D:\\YQM-Obsidian");
+        assert_eq!(env_value(&envs, "STEAM_REQUEST_DELAY_MS"), "30000");
+        assert_eq!(env_value(&envs, "STEAM_PAGE_DELAY_MS"), "60000");
+        assert_eq!(env_value(&envs, "STEAM_WORKER_LOOP_DELAY_MS"), "60000");
+        assert_eq!(env_value(&envs, "STEAM_WORKER_MODE"), "feed");
+        assert_eq!(env_value(&envs, "STEAM_WORKER_PAGES"), "1");
+        assert_eq!(env_value(&envs, "STEAM_WORKER_BATCH_SIZE"), "1");
+        assert_eq!(env_value(&envs, "STEAM_WORKER_MAX_DETAIL_SCANS"), "3");
+    }
+
+    #[test]
+    fn maps_old_fast_gui_intervals_to_safe_environment() {
+        let root = std::env::temp_dir().join(format!(
+            "steam-experience-sync-config-fast-test-{}",
+            std::process::id()
+        ));
+        let config_dir = root.join(".steam-experience-sync");
+        fs::create_dir_all(&config_dir).unwrap();
+        fs::write(
+            config_dir.join("config.json"),
+            r#"{
+              "requestDelayMs": 10000,
+              "pageDelayMs": 15000,
+              "workerLoopDelayMs": 10000
+            }"#,
+        )
+        .unwrap();
+
+        let envs = gui_config_env(&root).unwrap();
+
+        assert_eq!(env_value(&envs, "STEAM_REQUEST_DELAY_MS"), "30000");
+        assert_eq!(env_value(&envs, "STEAM_PAGE_DELAY_MS"), "60000");
+        assert_eq!(env_value(&envs, "STEAM_WORKER_LOOP_DELAY_MS"), "60000");
+    }
 }
 
 #[tauri::command]
 pub fn get_status() -> Result<String, String> {
-    run_node(&["src/index.mjs", "--worker-status"])
+    run_node(&["src/index.mjs", "--worker-status-json"])
 }
 
 #[tauri::command]
 pub fn get_logs() -> Result<String, String> {
-    run_node(&["src/index.mjs", "--worker-status"])
+    run_node(&["src/index.mjs", "--worker-log-tail"])
 }
 
 #[tauri::command]
-pub fn start_worker_loop() -> Result<CommandResult, String> {
+pub fn start_worker_loop(app: tauri::AppHandle) -> Result<CommandResult, String> {
     let root = project_root()?;
-    let clear_output = Command::new("node")
+    let mut clear_command = Command::new("node");
+    clear_command
         .arg("src/index.mjs")
         .arg("--clear-worker-stop")
-        .current_dir(&root)
-        .output()
-        .map_err(|error| error.to_string())?;
+        .current_dir(&root);
+    apply_gui_config_env(&mut clear_command, &root)?;
+    let clear_output = clear_command.output().map_err(|error| error.to_string())?;
     if !clear_output.status.success() {
         return Err(String::from_utf8_lossy(&clear_output.stderr).to_string());
     }
 
-    Command::new("node")
+    let mut worker_command = Command::new("node");
+    worker_command
         .arg("src/index.mjs")
         .arg("--worker-loop")
-        .current_dir(root)
+        .current_dir(&root)
         .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .map_err(|error| error.to_string())?;
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    apply_gui_config_env(&mut worker_command, &root)?;
+    let mut child = worker_command.spawn().map_err(|error| error.to_string())?;
+
+    // Stream stdout lines as Tauri events
+    if let Some(stdout) = child.stdout.take() {
+        let app_handle = app.clone();
+        std::thread::spawn(move || {
+            let reader = BufReader::new(stdout);
+            for line in reader.lines() {
+                match line {
+                    Ok(text) => {
+                        let _ = app_handle.emit("worker-output", text);
+                    }
+                    Err(_) => break,
+                }
+            }
+        });
+    }
+
+    // Stream stderr lines as Tauri events
+    if let Some(stderr) = child.stderr.take() {
+        let app_handle = app.clone();
+        std::thread::spawn(move || {
+            let reader = BufReader::new(stderr);
+            for line in reader.lines() {
+                match line {
+                    Ok(text) => {
+                        let _ = app_handle.emit("worker-output", text);
+                    }
+                    Err(_) => break,
+                }
+            }
+        });
+    }
+
+    // Spawn a thread to wait for the process and emit exit event
+    std::thread::spawn(move || {
+        let status = child.wait();
+        let exit_code = status.as_ref().ok().and_then(|s| s.code());
+        let exit_ok = status.map(|s| s.success()).unwrap_or(false);
+        let _ = app.emit(
+            "worker-exit",
+            serde_json::json!({
+                "code": exit_code,
+                "ok": exit_ok,
+            })
+            .to_string(),
+        );
+    });
 
     Ok(CommandResult {
         ok: true,

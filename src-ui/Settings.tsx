@@ -7,8 +7,11 @@ const fallbackConfig: GuiConfig = {
   vaultDir: '',
   speedMode: 'balanced',
   previewMode: 'confirm_each_run',
-  requestDelayMs: 10000,
-  pageDelayMs: 15000,
+  requestDelayMs: 30000,
+  pageDelayMs: 60000,
+  workerLoopDelayMs: 60000,
+  workerMaxDetailScans: 3,
+  workerMode: 'feed',
 };
 
 export function Settings() {
@@ -60,6 +63,16 @@ export function Settings() {
           <input value={config.vaultDir} onChange={(event) => update('vaultDir', event.target.value)} />
         </label>
         <label>
+          <span>同步模式</span>
+          <select
+            value={config.workerMode}
+            onChange={(event) => update('workerMode', event.target.value as GuiConfig['workerMode'])}
+          >
+            <option value="feed">截图流优先</option>
+            <option value="appid">按 AppID 队列</option>
+          </select>
+        </label>
+        <label>
           <span>速度模式</span>
           <select value={config.speedMode} onChange={(event) => update('speedMode', event.target.value)}>
             <option value="safe">安全</option>
@@ -89,6 +102,24 @@ export function Settings() {
             type="number"
             value={config.pageDelayMs}
             onChange={(event) => update('pageDelayMs', Number(event.target.value))}
+          />
+        </label>
+        <label>
+          <span>轮间隔 ms</span>
+          <input
+            type="number"
+            value={config.workerLoopDelayMs}
+            onChange={(event) => update('workerLoopDelayMs', Number(event.target.value))}
+          />
+        </label>
+        <label>
+          <span>每轮最多检查截图详情数</span>
+          <input
+            aria-label="每轮最多检查截图详情数"
+            type="number"
+            min="1"
+            value={config.workerMaxDetailScans}
+            onChange={(event) => update('workerMaxDetailScans', Math.max(1, Number(event.target.value)))}
           />
         </label>
       </div>
