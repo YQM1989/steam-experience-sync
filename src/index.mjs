@@ -23,7 +23,12 @@ import {
   isWorkerLockActive,
   releaseWorkerLock,
 } from './core/worker-lock.mjs';
-import { computeWorkerCursor } from './core/worker-progress.mjs';
+import {
+  computeNewestFeedCursor,
+  computeWorkerCursor,
+  normalizeNewestFeedState,
+  shouldStopScreenshotPagination,
+} from './core/worker-progress.mjs';
 
 const DEFAULT_EXPERIENCE_DIR = '00_输入源/50_我是谁/Steam体验记录';
 const DEFAULT_STATE_PATH = '.obsidian/steam-experience-sync/state.json';
@@ -401,16 +406,13 @@ async function runWorker(config, args) {
 }
 
 async function runFeedWorker(config, args, state, forceRateLimit) {
-  const feedState = state.worker.feed || { nextPage: 1, imported: 0 };
-  const startPage = feedState.nextPage || 1;
-  const checkedIds = Number(feedState.checkedPage) === Number(startPage)
-    ? (feedState.checkedIds || []).map(String)
-    : [];
-  const pageEnd = startPage + config.workerPages - 1;
+  const feedState = normalizeNewestFeedState(state.worker.feed);
+  const startPage = 1;
+  const checkedIds = (feedState.checkedIds || []).map(String);
   const workerConfig = {
     ...config,
     appids: [],
-    pages: config.workerPages,
+    pages: 1,
     startPage,
     limit: config.workerMaxDetailScans,
     maxMatches: config.workerBatchSize,
@@ -419,7 +421,7 @@ async function runFeedWorker(config, args, state, forceRateLimit) {
     skipDetailIds: checkedIds,
   };
 
-  console.log(`Worker batch: screenshot feed, pages ${workerConfig.startPage}-${pageEnd}, max ${workerConfig.maxMatches} match(es), max ${workerConfig.limit} detail check(s).`);
+  console.log(`Worker batch: newest screenshot feed page, max ${workerConfig.maxMatches} match(es), max ${workerConfig.limit} detail check(s).`);
 
   await writeWorkerLog(config, {
     level: 'info',
@@ -438,7 +440,7 @@ async function runFeedWorker(config, args, state, forceRateLimit) {
     }
 
     const summary = await runOnce(workerConfig, args, state);
-    const cursor = computeWorkerCursor({ startPage, checkedIds, summary });
+    const cursor = computeNewestFeedCursor({ checkedIds, summary });
 
     state.worker.feed = {
       ...feedState,
@@ -471,7 +473,7 @@ async function runFeedWorker(config, args, state, forceRateLimit) {
       stoppedByStopFile: summary.stoppedByStopFile,
       stoppedByScanLimit: summary.stoppedByScanLimit,
     });
-    console.log(`Worker done: screenshot feed, wrote ${summary.processed.length}, matched ${summary.matchedCount}, next page ${cursor.nextPage}.`);
+    console.log(`Worker done: newest screenshot feed, wrote ${summary.processed.length}, matched ${summary.matchedCount}.`);
   } catch (error) {
     await handleWorkerFailure(config, state, error, { mode: 'feed' });
   }
@@ -687,12 +689,12 @@ async function printWorkerStatus(config) {
   const stopExists = fsSync.existsSync(config.workerStopFile);
   const lockExists = await isWorkerLockActive(config.workerLockFile);
   const cooldownActive = worker.cooldownUntil ? Date.parse(worker.cooldownUntil) > Date.now() : false;
-  const feed = worker.feed || {};
+  const feed = normalizeNewestFeedState(worker.feed);
 
   console.log('Worker status');
   console.log(`  mode: ${config.workerMode}`);
   console.log(`  queue: ${queue.length > 0 ? queue.join(',') : '(empty)'}`);
-  console.log(`  feed next page: ${feed.nextPage || 1}`);
+  console.log('  feed scan: newest screenshot page');
   console.log(`  feed imported: ${feed.imported || 0}`);
   console.log(`  next appid: ${nextAppid}`);
   console.log(`  stop file: ${stopExists ? 'present' : 'absent'}`);
@@ -737,7 +739,7 @@ async function printWorkerStatusJson(config) {
       lastProcessedCount: item.lastProcessedCount ?? null,
     };
   });
-  const feed = worker.feed || {};
+  const feed = normalizeNewestFeedState(worker.feed);
 
   console.log(JSON.stringify({
     workerMode: config.workerMode,
@@ -762,7 +764,7 @@ async function printWorkerStatusJson(config) {
       lastDetailScannedCount: feed.lastDetailScannedCount ?? null,
     },
     configuredBatchSize: config.workerBatchSize,
-    configuredPages: config.workerPages,
+    configuredPages: config.workerMode === 'feed' ? 1 : config.workerPages,
     configuredMaxDetailScans: config.workerMaxDetailScans,
     configuredLoopDelayMs: config.workerLoopDelayMs,
   }));
@@ -976,16 +978,14 @@ async function* collectScreenshotIdPages(config) {
     const html = await fetchText(url);
     const matches = html.matchAll(/sharedfiles\/filedetails\/\?id=(\d+)|data-publishedfileid="(\d+)"/g);
     const ids = [];
-    let addedOnPage = 0;
     for (const match of matches) {
       const id = match[1] || match[2];
       if (!id || seen.has(id)) continue;
       seen.add(id);
       ids.push(id);
-      addedOnPage += 1;
     }
+    if (shouldStopScreenshotPagination(ids)) break;
     yield { page, ids };
-    if (allPages && addedOnPage === 0) break;
   }
 }
 
@@ -1206,7 +1206,9 @@ function normalizeWorkerState(value) {
     lastRateFailureAt: value?.lastRateFailureAt || null,
     pausedByRateLimit: Boolean(value?.pausedByRateLimit),
     appids: value?.appids && typeof value.appids === 'object' ? value.appids : {},
-    feed: value?.feed && typeof value.feed === 'object' ? value.feed : {},
+    feed: normalizeNewestFeedState(
+      value?.feed && typeof value.feed === 'object' ? value.feed : {},
+    ),
   };
 }
 

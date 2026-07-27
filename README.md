@@ -9,7 +9,8 @@
 - 通过 Steam 商店接口补充横版封面图。
 - 如果提供 `STEAM_API_KEY`，额外补充累计游玩时长。
 - 使用 state 文件去重，避免重复写入同一张截图。
-- 支持 discovery index，减少后续空扫。
+- 连续运行时每轮重新检查最新截图页，不遍历没有截图的游戏库。
+- 截图列表遇到空页立即停止，不会继续递增无效页码。
 - 支持 pending write preview：先生成待写入队列，再由 GUI 确认写入或跳过。
 - 遇到 429 会冷却；连续 3 次限流失败会暂停 worker 并通知。
 
@@ -66,12 +67,12 @@ node src/index.mjs --plan-writes --pages 1 --limit 5 --request-delay-ms 10000
 node src/index.mjs --read-pending
 node src/index.mjs --apply-pending
 node src/index.mjs --clear-pending
-node src/index.mjs --all --appid 2358720 --max-matches 5 --request-delay-ms 10000
+node src/index.mjs --all --request-delay-ms 30000 --page-delay-ms 60000
 ```
 
 ## Worker 模式
 
-Worker 用于把历史同步拆成低频小批次。它不是开机自启服务，每轮处理一小批后退出或等待下一轮。
+Worker 用于日常增量同步。默认 `feed` 模式每轮从最新截图页开始，只打开尚未处理的截图详情；不会沿着历史页码无限向后扫描。它不是开机自启服务，每轮处理一小批后退出或等待下一轮。
 
 ```bash
 npm run worker:dry-run
@@ -85,23 +86,25 @@ npm run worker:resume
 推荐配置：
 
 ```env
-STEAM_WORKER_APPIDS=2758000,4181110,1091500
+STEAM_WORKER_MODE=feed
 STEAM_WORKER_BATCH_SIZE=5
-STEAM_WORKER_PAGES=3
-STEAM_REQUEST_DELAY_MS=10000
-STEAM_PAGE_DELAY_MS=15000
-STEAM_WORKER_LOOP_DELAY_MS=10000
+STEAM_WORKER_MAX_DETAIL_SCANS=3
+STEAM_REQUEST_DELAY_MS=30000
+STEAM_PAGE_DELAY_MS=60000
+STEAM_WORKER_LOOP_DELAY_MS=60000
 STEAM_WORKER_COOLDOWN_ON_429_MS=28800000
 ```
 
 说明：
 
-- `npm run worker`：运行一轮，处理当前 appid 的一小批截图后退出。
-- `npm run worker:loop`：连续运行多轮；每轮结束后等待 `STEAM_WORKER_LOOP_DELAY_MS`，默认 10 秒。
-- `npm run worker:status`：查看队列、下一个 appid、页码、冷却和暂停状态。
+- `npm run worker`：检查一次最新截图页，处理一小批新截图后退出。
+- `npm run worker:loop`：连续运行多轮；每轮结束后等待 `STEAM_WORKER_LOOP_DELAY_MS`。
+- `npm run worker:status`：查看最新截图同步、冷却和暂停状态。
 - `npm run worker:stop`：创建 stop file，后续 worker 启动会退出。
 - `npm run worker:resume`：删除 stop file。
 - 遇到 429 后会冷却；连续 3 次 429 会写 stop file，并在桌面 GUI 中触发通知。
+
+历史补录与日常增量同步分开。需要补录旧截图时手动运行 `node src/index.mjs --all`；扫描遇到第一个空页即结束。旧的 discovery/appid 命令仍保留为兼容入口，但不再是桌面应用的默认工作流。
 
 状态时间显示统一使用北京时间；内部 JSON 仍保存 ISO 时间，方便跨设备判断。
 
@@ -162,7 +165,6 @@ macOS 需要 Rust toolchain 和 Xcode Command Line Tools。Apple Silicon / Intel
 ### 桌面应用界面
 
 - Dashboard：查看状态，连续运行、停止、刷新。
-- Queue：查看 discovery index 里有截图的游戏。
 - Preview：生成待写入队列，确认写入或跳过本轮。
 - Logs：查看运行日志。
 - Settings：编辑 Steam ID、API Key、vault 路径和请求间隔。

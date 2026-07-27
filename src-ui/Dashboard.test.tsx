@@ -51,8 +51,8 @@ describe('Dashboard feed mode', () => {
     });
 
     expect(screen.getByText('截图流进度')).toBeTruthy();
-    expect(screen.getByText('下一页')).toBeTruthy();
-    expect(screen.getByText('4')).toBeTruthy();
+    expect(screen.getByText('扫描范围')).toBeTruthy();
+    expect(screen.getByText('最新截图页')).toBeTruthy();
     expect(screen.getByText('12')).toBeTruthy();
   });
 });

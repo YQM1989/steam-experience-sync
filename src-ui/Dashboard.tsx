@@ -118,8 +118,8 @@ export function Dashboard({ busy, isWorkerRunning, liveOutput, status, onRefresh
               <h2>截图流进度</h2>
               <div className="status-grid">
                 <div className="status-item">
-                  <span className="status-label">下一页</span>
-                  <span className="status-value">{data.feedProgress.nextPage}</span>
+                  <span className="status-label">扫描范围</span>
+                  <span className="status-value">最新截图页</span>
                 </div>
                 <div className="status-item">
                   <span className="status-label">已写入</span>

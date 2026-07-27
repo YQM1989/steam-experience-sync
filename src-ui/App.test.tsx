@@ -70,7 +70,7 @@ describe('App', () => {
     render(<App />);
 
     expect(screen.getByRole('button', { name: 'Dashboard' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Queue' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Queue' })).toBeNull();
     expect(screen.getByRole('button', { name: 'Preview' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Logs' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Settings' })).toBeTruthy();

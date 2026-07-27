@@ -3,16 +3,14 @@ import { Dashboard } from './Dashboard';
 import { Logs } from './Logs';
 import { notifyPausedByRateLimit } from './notifications';
 import { Preview } from './Preview';
-import { Queue } from './Queue';
 import { Settings } from './Settings';
 import { getLogs, getStatus, startWorkerLoop, stopWorker, WorkerStatus } from './tauriApi';
 import { listen } from '@tauri-apps/api/event';
 
-type Tab = 'dashboard' | 'queue' | 'preview' | 'logs' | 'settings';
+type Tab = 'dashboard' | 'preview' | 'logs' | 'settings';
 
 const tabs: Array<{ id: Tab; label: string }> = [
   { id: 'dashboard', label: 'Dashboard' },
-  { id: 'queue', label: 'Queue' },
   { id: 'preview', label: 'Preview' },
   { id: 'logs', label: 'Logs' },
   { id: 'settings', label: 'Settings' },
@@ -127,7 +125,6 @@ export function App() {
           onStop={stop}
         />
       ) : null}
-      {activeTab === 'queue' ? <Queue /> : null}
       {activeTab === 'preview' ? <Preview /> : null}
       {activeTab === 'logs' ? <Logs busy={busy} logs={logs} onRefresh={refresh} /> : null}
       {activeTab === 'settings' ? <Settings /> : null}

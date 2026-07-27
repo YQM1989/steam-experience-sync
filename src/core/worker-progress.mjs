@@ -15,6 +15,36 @@ export function computeWorkerCursor({ startPage, checkedIds = [], summary }) {
   };
 }
 
+export function shouldStopScreenshotPagination(ids) {
+  return !Array.isArray(ids) || ids.length === 0;
+}
+
+export function normalizeNewestFeedState(value = {}) {
+  const isNewestPage = Number(value.nextPage || 1) === 1;
+  const checkedPage = isNewestPage && Number(value.checkedPage) === 1 ? 1 : null;
+
+  return {
+    ...value,
+    nextPage: 1,
+    checkedPage,
+    checkedIds: checkedPage === 1 ? unique(value.checkedIds || []) : [],
+  };
+}
+
+export function computeNewestFeedCursor({ checkedIds = [], summary }) {
+  const cursor = computeWorkerCursor({
+    startPage: 1,
+    checkedIds,
+    summary,
+  });
+
+  return {
+    ...cursor,
+    nextPage: 1,
+    checkedPage: cursor.checkedIds.length > 0 ? 1 : null,
+  };
+}
+
 function unique(values) {
   return [...new Set(values.filter(Boolean).map(String))];
 }
