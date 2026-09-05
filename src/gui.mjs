@@ -213,7 +213,7 @@ function renderPage() {
       <h2>运行控制</h2>
       <div class="buttons">
         <button class="primary" id="runOnce">运行一轮</button>
-        <button class="primary" id="runLoop">连续运行</button>
+        <button class="primary" id="runLoop">开始同步</button>
         <button class="danger" id="stop">停止</button>
         <button id="resume">恢复</button>
       </div>

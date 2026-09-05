@@ -80,17 +80,17 @@ function renderDashboard(status: WorkerStatus = baseStatus, isWorkerRunning = fa
 }
 
 describe('Dashboard', () => {
-  it('disables continuous run while worker is already running', () => {
+  it('disables start sync while worker is already running', () => {
     renderDashboard(baseStatus, true);
 
-    const button = screen.getByRole('button', { name: '运行中...' });
+    const button = screen.getByRole('button', { name: '同步中...' });
     expect(button.hasAttribute('disabled')).toBe(true);
   });
 
-  it('explains that stop file pause can be resumed by continuous run', () => {
+  it('explains that stop file pause can be resumed by start sync', () => {
     renderDashboard({ ...baseStatus, stopFilePresent: true });
 
-    expect(screen.getByText('已暂停，点击连续运行会清除停止标记并恢复')).toBeTruthy();
+    expect(screen.getByText('已暂停，点击开始同步会清除停止标记并恢复')).toBeTruthy();
   });
 
   it('does not show an expired cooldown timestamp when cooldown is inactive', () => {

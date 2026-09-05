@@ -18,13 +18,13 @@ export const DEFAULT_GUI_CONFIG = {
   workerMaxDetailScans: 3,
   workerMode: 'feed',
   speedMode: 'balanced',
-  previewMode: 'confirm_each_run',
 };
 
 export function normalizeGuiConfig(input = {}) {
+  const { previewMode: _legacyPreviewMode, ...rest } = input;
   return {
     ...DEFAULT_GUI_CONFIG,
-    ...input,
+    ...rest,
     requestDelayMs: numberAtLeast(input.requestDelayMs, SAFE_REQUEST_DELAY_MS),
     pageDelayMs: numberAtLeast(input.pageDelayMs, SAFE_PAGE_DELAY_MS),
     workerLoopDelayMs: numberAtLeast(input.workerLoopDelayMs, SAFE_WORKER_LOOP_DELAY_MS),

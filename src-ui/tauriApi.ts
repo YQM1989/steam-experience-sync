@@ -46,29 +46,11 @@ export type GuiConfig = {
   steamApiKey: string;
   vaultDir: string;
   speedMode: string;
-  previewMode: string;
   requestDelayMs: number;
   pageDelayMs: number;
   workerLoopDelayMs: number;
   workerMaxDetailScans: number;
   workerMode: 'feed' | 'appid';
-};
-
-export type PendingWrite = {
-  id: string;
-  appid: string;
-  game: string;
-  date?: string;
-  caption?: string;
-  image?: string;
-  targetFile?: string;
-  url?: string;
-};
-
-export type PendingWrites = {
-  createdAt?: string;
-  outputDir?: string;
-  items: PendingWrite[];
 };
 
 export type DiscoveredGame = {
@@ -97,23 +79,6 @@ export async function startWorkerLoop(): Promise<CommandResult> {
 
 export async function stopWorker(): Promise<CommandResult> {
   return invoke<CommandResult>('stop_worker');
-}
-
-export async function readPendingWrites(): Promise<PendingWrites> {
-  const raw = await invoke<string>('read_pending_writes');
-  return JSON.parse(raw) as PendingWrites;
-}
-
-export async function planWrites(): Promise<CommandResult> {
-  return invoke<CommandResult>('plan_writes');
-}
-
-export async function applyPendingWrites(): Promise<CommandResult> {
-  return invoke<CommandResult>('apply_pending_writes');
-}
-
-export async function clearPendingWrites(): Promise<CommandResult> {
-  return invoke<CommandResult>('clear_pending_writes');
 }
 
 export async function readDiscoveryIndex(): Promise<DiscoveryIndex> {

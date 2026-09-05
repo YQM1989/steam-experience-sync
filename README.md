@@ -11,7 +11,7 @@
 - 使用 state 文件去重，避免重复写入同一张截图。
 - 连续运行时每轮重新检查最新截图页，不遍历没有截图的游戏库。
 - 截图列表遇到空页立即停止，不会继续递增无效页码。
-- 支持 pending write preview：先生成待写入队列，再由 GUI 确认写入或跳过。
+- 支持 pending write preview：先用 `--plan-writes` 生成待写入队列，检查后再写入（`--apply-pending`）或跳过（`--clear-pending`）。
 - 遇到 429 会冷却；连续 3 次限流失败会暂停 worker 并通知。
 
 ## 不做什么
@@ -72,7 +72,7 @@ node src/index.mjs --all --request-delay-ms 30000 --page-delay-ms 60000
 
 ## Worker 模式
 
-Worker 用于日常增量同步。默认 `feed` 模式每轮从最新截图页开始，只打开尚未处理的截图详情；不会沿着历史页码无限向后扫描。它不是开机自启服务，每轮处理一小批后退出或等待下一轮。
+Worker 用于日常增量同步。默认 `feed` 模式每轮从最新截图页开始，只打开尚未处理的截图详情；不会沿着历史页码无限向后扫描。它不是常驻监控服务：连续处理完当前积压后，首次确认最新页没有未处理截图就自动退出。
 
 ```bash
 npm run worker:dry-run
@@ -98,7 +98,7 @@ STEAM_WORKER_COOLDOWN_ON_429_MS=28800000
 说明：
 
 - `npm run worker`：检查一次最新截图页，处理一小批新截图后退出。
-- `npm run worker:loop`：连续运行多轮；每轮结束后等待 `STEAM_WORKER_LOOP_DELAY_MS`。
+- `npm run worker:loop`：连续处理当前积压；每轮结束后等待 `STEAM_WORKER_LOOP_DELAY_MS`，首次确认没有未处理截图后自动退出。
 - `npm run worker:status`：查看最新截图同步、冷却和暂停状态。
 - `npm run worker:stop`：创建 stop file，后续 worker 启动会退出。
 - `npm run worker:resume`：删除 stop file。
@@ -164,10 +164,11 @@ macOS 需要 Rust toolchain 和 Xcode Command Line Tools。Apple Silicon / Intel
 
 ### 桌面应用界面
 
-- Dashboard：查看状态，连续运行、停止、刷新。
-- Preview：生成待写入队列，确认写入或跳过本轮。
+- Dashboard：查看状态，开始同步、停止、刷新。
 - Logs：查看运行日志。
 - Settings：编辑 Steam ID、API Key、vault 路径和请求间隔。
+
+日常增量同步直接写入笔记，不需要预览确认。历史补录时先用 `--plan-writes` 生成待写入队列，再检查与写入（见"全量导入建议"）。
 
 API Key 在 GUI 中默认以密码框显示；`.steam-experience-sync/config.json` 已被 `.gitignore` 忽略，不要提交真实密钥。
 
@@ -201,7 +202,7 @@ docs\obsidian-steam-experience.css
 
 1. 先 discovery：`node src/index.mjs --discover --pages 3 --request-delay-ms 10000`
 2. 再预览：`node src/index.mjs --plan-writes --pages 1 --limit 5 --request-delay-ms 10000`
-3. 在 GUI Preview 中确认内容。
+3. 检查待写入列表：`node src/index.mjs --read-pending`
 4. 确认无误后写入：`node src/index.mjs --apply-pending`
 5. 历史很多时按 `--appid` 一款游戏一款游戏处理。
 

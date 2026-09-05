@@ -27,6 +27,7 @@ import {
   computeNewestFeedCursor,
   computeWorkerCursor,
   normalizeNewestFeedState,
+  shouldStopFeedWorkerLoop,
   shouldStopScreenshotPagination,
 } from './core/worker-progress.mjs';
 
@@ -398,11 +399,10 @@ async function runWorker(config, args) {
   }
 
   if (config.workerMode === 'feed') {
-    await runFeedWorker(config, args, state, forceRateLimit);
-    return;
+    return runFeedWorker(config, args, state, forceRateLimit);
   }
 
-  await runAppidWorker(config, args, state, forceRateLimit);
+  return runAppidWorker(config, args, state, forceRateLimit);
 }
 
 async function runFeedWorker(config, args, state, forceRateLimit) {
@@ -474,8 +474,10 @@ async function runFeedWorker(config, args, state, forceRateLimit) {
       stoppedByScanLimit: summary.stoppedByScanLimit,
     });
     console.log(`Worker done: newest screenshot feed, wrote ${summary.processed.length}, matched ${summary.matchedCount}.`);
+    return summary;
   } catch (error) {
     await handleWorkerFailure(config, state, error, { mode: 'feed' });
+    return null;
   }
 }
 
@@ -630,7 +632,7 @@ async function runWorkerLoop(config, args) {
 
   try {
     while (true) {
-      await runWorker({ ...config, worker: true }, args);
+      const summary = await runWorker({ ...config, worker: true }, args);
 
       if (config.dryRun) {
         console.log('Worker loop dry-run stops after one round.');
@@ -638,6 +640,16 @@ async function runWorkerLoop(config, args) {
       }
       if (fsSync.existsSync(config.workerStopFile)) {
         console.log(`Worker loop stopped by ${config.workerStopFile}`);
+        return;
+      }
+      if (config.workerMode === 'feed' && shouldStopFeedWorkerLoop(summary)) {
+        await writeWorkerLog(config, {
+          level: 'info',
+          event: 'worker_loop_complete',
+          mode: 'feed',
+          reason: 'no_unseen_screenshots',
+        });
+        console.log('Sync complete: newest screenshot page has no unseen screenshots.');
         return;
       }
 

@@ -13,7 +13,6 @@ test('writeGuiConfig stores api key but redacts public view', async () => {
     steamApiKey: 'secret-key',
     vaultDir: 'D:/YQM-Obsidian',
     speedMode: 'balanced',
-    previewMode: 'confirm_each_run',
   });
 
   const config = await readGuiConfig(root);
@@ -64,4 +63,18 @@ test('readGuiConfig migrates old fast intervals to safe floors', async () => {
   assert.equal(config.requestDelayMs, 30000);
   assert.equal(config.pageDelayMs, 60000);
   assert.equal(config.workerLoopDelayMs, 60000);
+});
+
+test('readGuiConfig drops the retired previewMode field', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'steam-sync-config-'));
+  const configFile = path.join(root, '.steam-experience-sync', 'config.json');
+  await fs.mkdir(path.dirname(configFile), { recursive: true });
+  await fs.writeFile(
+    configFile,
+    JSON.stringify({ vaultDir: 'D:/YQM-Obsidian', previewMode: 'confirm_each_run' }),
+  );
+
+  const config = await readGuiConfig(root);
+
+  assert.equal('previewMode' in config, false);
 });

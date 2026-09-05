@@ -60,7 +60,7 @@ export function Dashboard({ busy, isWorkerRunning, liveOutput, status, onRefresh
 
       <div className="toolbar">
         <button disabled={busy || isWorkerRunning} onClick={onRunLoop}>
-          {isWorkerRunning ? '运行中...' : '连续运行'}
+          {isWorkerRunning ? '同步中...' : '开始同步'}
         </button>
         <button disabled={busy} onClick={onStop}>
           停止
@@ -83,7 +83,7 @@ export function Dashboard({ busy, isWorkerRunning, liveOutput, status, onRefresh
 
           {data.stopFilePresent && !data.pausedByRateLimit && (
             <div className="info-banner">
-              已暂停，点击连续运行会清除停止标记并恢复
+              已暂停，点击开始同步会清除停止标记并恢复
             </div>
           )}
 

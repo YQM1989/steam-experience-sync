@@ -8,6 +8,21 @@ use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use tauri::Emitter;
 
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
+
+// The app binary is GUI-subsystem on Windows, so spawned Node processes would
+// otherwise each flash a new console window.
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+fn node_command() -> Command {
+    let mut command = Command::new("node");
+    #[cfg(windows)]
+    command.creation_flags(CREATE_NO_WINDOW);
+    command
+}
+
 #[derive(Serialize)]
 pub struct CommandResult {
     ok: bool,
@@ -159,7 +174,7 @@ fn push_number_env_at_least(
 
 fn run_node(args: &[&str]) -> Result<String, String> {
     let root = project_root()?;
-    let mut command = Command::new("node");
+    let mut command = node_command();
     command.args(args).current_dir(&root);
     apply_gui_config_env(&mut command, &root)?;
 
@@ -288,7 +303,7 @@ pub fn get_logs() -> Result<String, String> {
 #[tauri::command]
 pub fn start_worker_loop(app: tauri::AppHandle) -> Result<CommandResult, String> {
     let root = project_root()?;
-    let mut clear_command = Command::new("node");
+    let mut clear_command = node_command();
     clear_command
         .arg("src/index.mjs")
         .arg("--clear-worker-stop")
@@ -299,7 +314,7 @@ pub fn start_worker_loop(app: tauri::AppHandle) -> Result<CommandResult, String>
         return Err(String::from_utf8_lossy(&clear_output.stderr).to_string());
     }
 
-    let mut worker_command = Command::new("node");
+    let mut worker_command = node_command();
     worker_command
         .arg("src/index.mjs")
         .arg("--worker-loop")
@@ -359,36 +374,13 @@ pub fn start_worker_loop(app: tauri::AppHandle) -> Result<CommandResult, String>
 
     Ok(CommandResult {
         ok: true,
-        message: "worker loop started; stop file cleared".to_string(),
+        message: "sync started; stop file cleared".to_string(),
     })
 }
 
 #[tauri::command]
 pub fn stop_worker() -> Result<CommandResult, String> {
     let message = run_node(&["src/index.mjs", "--stop-worker"])?;
-    Ok(CommandResult { ok: true, message })
-}
-
-#[tauri::command]
-pub fn read_pending_writes() -> Result<String, String> {
-    run_node(&["src/index.mjs", "--read-pending"])
-}
-
-#[tauri::command]
-pub fn plan_writes() -> Result<CommandResult, String> {
-    let message = run_node(&["src/index.mjs", "--plan-writes"])?;
-    Ok(CommandResult { ok: true, message })
-}
-
-#[tauri::command]
-pub fn apply_pending_writes() -> Result<CommandResult, String> {
-    let message = run_node(&["src/index.mjs", "--apply-pending"])?;
-    Ok(CommandResult { ok: true, message })
-}
-
-#[tauri::command]
-pub fn clear_pending_writes() -> Result<CommandResult, String> {
-    let message = run_node(&["src/index.mjs", "--clear-pending"])?;
     Ok(CommandResult { ok: true, message })
 }
 
@@ -409,7 +401,7 @@ pub fn read_config() -> Result<String, String> {
 pub fn write_config(payload: String) -> Result<CommandResult, String> {
     let root = project_root()?;
     let script = "let raw=''; process.stdin.on('data', chunk => raw += chunk); process.stdin.on('end', () => import('./src/core/config-store.mjs').then(async m => { const result = await m.writeGuiConfig(process.cwd(), JSON.parse(raw || '{}')); console.log(JSON.stringify(result)); }).catch(error => { console.error(error.message); process.exit(1); }));";
-    let mut child = Command::new("node")
+    let mut child = node_command()
         .arg("-e")
         .arg(script)
         .current_dir(root)

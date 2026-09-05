@@ -8,7 +8,6 @@ vi.mock('./tauriApi', () => ({
     steamApiKey: '',
     vaultDir: '',
     speedMode: 'balanced',
-    previewMode: 'confirm_each_run',
     requestDelayMs: 30000,
     pageDelayMs: 60000,
     workerLoopDelayMs: 60000,

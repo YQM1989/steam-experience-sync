@@ -45,6 +45,19 @@ export function computeNewestFeedCursor({ checkedIds = [], summary }) {
   };
 }
 
+export function shouldStopFeedWorkerLoop(summary) {
+  if (!summary || typeof summary !== 'object') return false;
+  if (
+    summary.stoppedByMaxMatches
+    || summary.stoppedByScanLimit
+    || summary.stoppedByStopFile
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
 function unique(values) {
   return [...new Set(values.filter(Boolean).map(String))];
 }

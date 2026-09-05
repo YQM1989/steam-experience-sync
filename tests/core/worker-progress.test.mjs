@@ -88,3 +88,53 @@ test('newest feed keeps partial page checks but never advances past page one', (
     checkedIds: ['100', '101'],
   });
 });
+
+test('feed loop stops after a successful scan finds no unseen screenshot details', () => {
+  assert.equal(typeof workerProgress.shouldStopFeedWorkerLoop, 'function');
+
+  assert.equal(workerProgress.shouldStopFeedWorkerLoop({
+    matchedCount: 0,
+    processed: [],
+    scannedCount: 0,
+    stoppedByMaxMatches: false,
+    stoppedByScanLimit: false,
+    stoppedByStopFile: false,
+  }), true);
+});
+
+test('feed loop continues while the current screenshot backlog is being processed', () => {
+  assert.equal(typeof workerProgress.shouldStopFeedWorkerLoop, 'function');
+
+  assert.equal(workerProgress.shouldStopFeedWorkerLoop({
+    matchedCount: 3,
+    processed: ['101', '102', '103'],
+    scannedCount: 3,
+    stoppedByMaxMatches: false,
+    stoppedByScanLimit: true,
+    stoppedByStopFile: false,
+  }), false);
+});
+
+test('feed loop stops immediately after the final productive batch exhausts page one', () => {
+  assert.equal(workerProgress.shouldStopFeedWorkerLoop({
+    matchedCount: 3,
+    processed: ['101', '102', '103'],
+    scannedCount: 3,
+    stoppedByMaxMatches: false,
+    stoppedByScanLimit: false,
+    stoppedByStopFile: false,
+  }), true);
+});
+
+test('feed loop does not report automatic completion after a manual stop', () => {
+  assert.equal(typeof workerProgress.shouldStopFeedWorkerLoop, 'function');
+
+  assert.equal(workerProgress.shouldStopFeedWorkerLoop({
+    matchedCount: 0,
+    processed: [],
+    scannedCount: 0,
+    stoppedByMaxMatches: false,
+    stoppedByScanLimit: false,
+    stoppedByStopFile: true,
+  }), false);
+});

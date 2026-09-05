@@ -6,7 +6,6 @@ const fallbackConfig: GuiConfig = {
   steamApiKey: '',
   vaultDir: '',
   speedMode: 'balanced',
-  previewMode: 'confirm_each_run',
   requestDelayMs: 30000,
   pageDelayMs: 60000,
   workerLoopDelayMs: 60000,
@@ -78,14 +77,6 @@ export function Settings() {
             <option value="safe">安全</option>
             <option value="balanced">平衡</option>
             <option value="fast">快速</option>
-          </select>
-        </label>
-        <label>
-          <span>写入预览</span>
-          <select value={config.previewMode} onChange={(event) => update('previewMode', event.target.value)}>
-            <option value="confirm_each_run">每轮确认</option>
-            <option value="auto">自动写入</option>
-            <option value="auto_after_preview">预览后自动写入</option>
           </select>
         </label>
         <label>
