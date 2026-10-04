@@ -23,6 +23,8 @@
     "ui:preview": "vite preview",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
+    "desktop:prepare": "node scripts/prepare-macos-runtime.mjs",
+    "desktop:verify-mac": "node scripts/verify-macos-bundle.mjs",
     "test": "node --test tests/**/*.test.mjs",
     "test:ui": "vitest run",
     "check": "node --check src/index.mjs && node --check src/gui.mjs && npm run ui:build"

@@ -1,0 +1,61 @@
+name: Build Apple Silicon Mac App
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'src-ui/**'
+      - 'src-tauri/**'
+      - 'scripts/**'
+      - 'tests/**'
+      - 'package*.json'
+      - '*config*'
+      - '.github/workflows/build-macos.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: macos-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  macos-arm64:
+    runs-on: macos-15
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          architecture: arm64
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Prepare embedded runtime
+        run: npm run desktop:prepare
+      - name: Test Node core and React UI
+        run: |
+          npm test
+          npm run test:ui
+          npm run check
+      - name: Prepare Rust toolchain
+        run: rustup update stable --no-self-update
+      - name: Test Rust shell
+        run: |
+          cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
+          cargo test --manifest-path src-tauri/Cargo.toml --locked
+      - name: Build app and DMG
+        run: npm run tauri:build
+      - name: Verify packaged runtime and ad-hoc signatures offline
+        run: |
+          npm run desktop:verify-mac
+          codesign --verify --deep --strict "src-tauri/target/release/bundle/macos/Steam Experience Sync.app"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Steam-Experience-Sync-macOS-arm64
+          path: src-tauri/target/release/bundle/dmg/*.dmg
+          if-no-files-found: error
+          retention-days: 30

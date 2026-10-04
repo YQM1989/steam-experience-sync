@@ -1,69 +1,17 @@
+use crate::runtime::RuntimePaths;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io::BufRead;
 use std::io::BufReader;
 use std::io::Write;
 use std::path::Path;
-use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use tauri::Emitter;
-
-#[cfg(windows)]
-use std::os::windows::process::CommandExt;
-
-// The app binary is GUI-subsystem on Windows, so spawned Node processes would
-// otherwise each flash a new console window.
-#[cfg(windows)]
-const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-
-fn node_command() -> Command {
-    let mut command = Command::new("node");
-    #[cfg(windows)]
-    command.creation_flags(CREATE_NO_WINDOW);
-    command
-}
 
 #[derive(Serialize)]
 pub struct CommandResult {
     ok: bool,
     message: String,
-}
-
-fn project_root() -> Result<PathBuf, String> {
-    if let Ok(value) = std::env::var("STEAM_EXPERIENCE_SYNC_ROOT") {
-        let path = PathBuf::from(value);
-        if is_project_root(&path) {
-            return Ok(path);
-        }
-    }
-
-    let cwd = std::env::current_dir().map_err(|error| error.to_string())?;
-    if let Some(root) = find_project_root_from(&cwd) {
-        return Ok(root);
-    }
-
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(parent) = exe.parent() {
-            if let Some(root) = find_project_root_from(parent) {
-                return Ok(root);
-            }
-        }
-    }
-
-    Err("Cannot locate project root containing src/index.mjs.".to_string())
-}
-
-fn find_project_root_from(start: &Path) -> Option<PathBuf> {
-    for candidate in start.ancestors() {
-        if is_project_root(candidate) {
-            return Some(candidate.to_path_buf());
-        }
-    }
-    None
-}
-
-fn is_project_root(path: &Path) -> bool {
-    path.join("src").join("index.mjs").exists()
 }
 
 #[derive(Default, Deserialize)]
@@ -85,8 +33,7 @@ struct GuiConfig {
     worker_max_detail_scans: Option<u64>,
 }
 
-fn gui_config_env(root: &Path) -> Result<Vec<(&'static str, String)>, String> {
-    let file_path = root.join(".steam-experience-sync").join("config.json");
+fn gui_config_env(file_path: &Path) -> Result<Vec<(&'static str, String)>, String> {
     if !file_path.exists() {
         return Ok(Vec::new());
     }
@@ -136,8 +83,8 @@ fn gui_config_env(root: &Path) -> Result<Vec<(&'static str, String)>, String> {
     Ok(envs)
 }
 
-fn apply_gui_config_env(command: &mut Command, root: &Path) -> Result<(), String> {
-    for (key, value) in gui_config_env(root)? {
+fn apply_gui_config_env(command: &mut Command, config_file: &Path) -> Result<(), String> {
+    for (key, value) in gui_config_env(config_file)? {
         command.env(key, value);
     }
     Ok(())
@@ -172,11 +119,16 @@ fn push_number_env_at_least(
     }
 }
 
-fn run_node(args: &[&str]) -> Result<String, String> {
-    let root = project_root()?;
-    let mut command = node_command();
-    command.args(args).current_dir(&root);
-    apply_gui_config_env(&mut command, &root)?;
+fn configured_command(app: &tauri::AppHandle) -> Result<Command, String> {
+    let runtime = RuntimePaths::resolve(app)?;
+    let mut command = runtime.command();
+    apply_gui_config_env(&mut command, &runtime.config_file)?;
+    Ok(command)
+}
+
+fn run_node(app: &tauri::AppHandle, args: &[&str]) -> Result<String, String> {
+    let mut command = configured_command(app)?;
+    command.args(args);
 
     let output = command.output().map_err(|error| error.to_string())?;
 
@@ -195,7 +147,8 @@ fn run_node(args: &[&str]) -> Result<String, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{find_project_root_from, gui_config_env};
+    use super::gui_config_env;
+    use crate::runtime::find_project_root_from;
     use std::fs;
 
     fn env_value(envs: &[(&'static str, String)], name: &str) -> String {
@@ -250,7 +203,7 @@ mod tests {
         )
         .unwrap();
 
-        let envs = gui_config_env(&root).unwrap();
+        let envs = gui_config_env(&config_dir.join("config.json")).unwrap();
 
         assert_eq!(env_value(&envs, "STEAM_ID"), "76561198119055866");
         assert_eq!(env_value(&envs, "STEAM_API_KEY"), "test-key");
@@ -282,7 +235,7 @@ mod tests {
         )
         .unwrap();
 
-        let envs = gui_config_env(&root).unwrap();
+        let envs = gui_config_env(&config_dir.join("config.json")).unwrap();
 
         assert_eq!(env_value(&envs, "STEAM_REQUEST_DELAY_MS"), "30000");
         assert_eq!(env_value(&envs, "STEAM_PAGE_DELAY_MS"), "60000");
@@ -291,38 +244,33 @@ mod tests {
 }
 
 #[tauri::command]
-pub fn get_status() -> Result<String, String> {
-    run_node(&["src/index.mjs", "--worker-status-json"])
+pub fn get_status(app: tauri::AppHandle) -> Result<String, String> {
+    run_node(&app, &["src/index.mjs", "--worker-status-json"])
 }
 
 #[tauri::command]
-pub fn get_logs() -> Result<String, String> {
-    run_node(&["src/index.mjs", "--worker-log-tail"])
+pub fn get_logs(app: tauri::AppHandle) -> Result<String, String> {
+    run_node(&app, &["src/index.mjs", "--worker-log-tail"])
 }
 
 #[tauri::command]
 pub fn start_worker_loop(app: tauri::AppHandle) -> Result<CommandResult, String> {
-    let root = project_root()?;
-    let mut clear_command = node_command();
+    let mut clear_command = configured_command(&app)?;
     clear_command
         .arg("src/index.mjs")
-        .arg("--clear-worker-stop")
-        .current_dir(&root);
-    apply_gui_config_env(&mut clear_command, &root)?;
+        .arg("--clear-worker-stop");
     let clear_output = clear_command.output().map_err(|error| error.to_string())?;
     if !clear_output.status.success() {
         return Err(String::from_utf8_lossy(&clear_output.stderr).to_string());
     }
 
-    let mut worker_command = node_command();
+    let mut worker_command = configured_command(&app)?;
     worker_command
         .arg("src/index.mjs")
         .arg("--worker-loop")
-        .current_dir(&root)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    apply_gui_config_env(&mut worker_command, &root)?;
     let mut child = worker_command.spawn().map_err(|error| error.to_string())?;
 
     // Stream stdout lines as Tauri events
@@ -379,32 +327,32 @@ pub fn start_worker_loop(app: tauri::AppHandle) -> Result<CommandResult, String>
 }
 
 #[tauri::command]
-pub fn stop_worker() -> Result<CommandResult, String> {
-    let message = run_node(&["src/index.mjs", "--stop-worker"])?;
+pub fn stop_worker(app: tauri::AppHandle) -> Result<CommandResult, String> {
+    let message = run_node(&app, &["src/index.mjs", "--stop-worker"])?;
     Ok(CommandResult { ok: true, message })
 }
 
 #[tauri::command]
-pub fn read_discovery_index() -> Result<String, String> {
-    run_node(&["src/index.mjs", "--read-discovery"])
+pub fn read_discovery_index(app: tauri::AppHandle) -> Result<String, String> {
+    run_node(&app, &["src/index.mjs", "--read-discovery"])
 }
 
 #[tauri::command]
-pub fn read_config() -> Result<String, String> {
-    run_node(&[
+pub fn read_config(app: tauri::AppHandle) -> Result<String, String> {
+    run_node(&app, &[
         "-e",
         "import('./src/core/config-store.mjs').then(async m => console.log(JSON.stringify(await m.readGuiConfig(process.cwd())))).catch(error => { console.error(error.message); process.exit(1); })",
     ])
 }
 
 #[tauri::command]
-pub fn write_config(payload: String) -> Result<CommandResult, String> {
-    let root = project_root()?;
+pub fn write_config(app: tauri::AppHandle, payload: String) -> Result<CommandResult, String> {
+    let runtime = RuntimePaths::resolve(&app)?;
     let script = "let raw=''; process.stdin.on('data', chunk => raw += chunk); process.stdin.on('end', () => import('./src/core/config-store.mjs').then(async m => { const result = await m.writeGuiConfig(process.cwd(), JSON.parse(raw || '{}')); console.log(JSON.stringify(result)); }).catch(error => { console.error(error.message); process.exit(1); }));";
-    let mut child = node_command()
+    let mut child = runtime
+        .command()
         .arg("-e")
         .arg(script)
-        .current_dir(root)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

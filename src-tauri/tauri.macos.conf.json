@@ -1,0 +1,23 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "build": {
+    "beforeDevCommand": "npm run desktop:prepare && npm run ui:dev",
+    "beforeBuildCommand": "npm run desktop:prepare && npm run ui:build"
+  },
+  "bundle": {
+    "targets": ["app", "dmg"],
+    "icon": ["icons/icon.icns", "icons/icon.png"],
+    "externalBin": ["runtime/steam-node"],
+    "resources": {
+      "../src/": "worker/src/",
+      "../package.json": "worker/package.json",
+      "../docs/obsidian-steam-experience.css": "worker/docs/obsidian-steam-experience.css",
+      "runtime/NODE-LICENSE": "worker/NODE-LICENSE"
+    },
+    "macOS": {
+      "minimumSystemVersion": "13.5",
+      "entitlements": "entitlements.macos.plist",
+      "signingIdentity": "-"
+    }
+  }
+}

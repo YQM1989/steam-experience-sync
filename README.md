@@ -126,7 +126,7 @@ http://127.0.0.1:8765
 
 ## Desktop App
 
-第一版桌面应用使用 React + Tauri。当前仍要求本机已安装 Node.js，因为 Tauri 壳会调用现有 Node 同步核心。
+桌面应用使用 React + Tauri，与命令行共用 Node 同步核心。Windows 源码运行仍需要安装 Node.js；Apple Silicon Mac 安装包内置 Node，无需安装 Node、Rust 或使用命令行。
 
 ### Windows
 
@@ -149,18 +149,42 @@ src-tauri\target\release\bundle\
 
 ### macOS
 
-```bash
-npm install
-npm run tauri:dev
-```
+面向 M 系列芯片（arm64），系统要求 macOS 13.5 或更新。Intel Mac 暂未提供安装包。
 
-打包：
+**直接安装使用：**
+
+1. 打开仓库的 [Actions](https://github.com/YQM1989/steam-experience-sync/actions/workflows/build-macos.yml)，选择最近一次成功的 `Build Apple Silicon Mac App`。
+2. 下载该次构建的 `Steam-Experience-Sync-macOS-arm64` 附件，解压得到 `.dmg`。
+3. 打开 `.dmg`，把 `Steam Experience Sync.app` 拖到“应用程序”，之后双击启动。
+4. 在 Settings 填写 Steam ID、可选 API Key，以及 **Mac 上的 Obsidian 仓库根目录**，例如 `/Users/你的用户名/Documents/YQM-Obsidian`。不要填写 `Steam体验记录` 子目录，也不要使用 Windows 的 `D:\...` 路径。
+5. 保存设置，再在 Dashboard 开始同步。同步逻辑与 Windows 相同，不会自动改成全量历史扫描。
+
+安装包目前采用 ad-hoc 签名，尚未经过 Apple Developer ID 签名和公证；首次从网上下载后可能被 macOS 拦截。确认来源为自己的仓库后，按 macOS“系统设置 → 隐私与安全性”里的提示允许打开，不需要关闭系统安全功能。[Tauri 签名说明](https://v2.tauri.app/distribute/sign/macos/)
+
+Mac 安装版配置保存在 `~/Library/Application Support/com.yqm.steam-experience-sync/config.json`，不写入 `.app` 或源码目录；API Key 仍是本机配置文件中的明文，文件权限限定为当前用户读写，不要分享该文件。卸载或更新应用不会主动删除配置。笔记和同步状态仍在你选择的 Obsidian 仓库中。
+
+**开发者在 Apple Silicon Mac 上构建：**
+
+构建机器需要 arm64 Node.js 24、Rust 和 Xcode Command Line Tools；这些仅用于开发，不是安装用户的要求。[Tauri 环境要求](https://v2.tauri.app/start/prerequisites/)
 
 ```bash
+npm ci
+npm run desktop:prepare
+npm test
+npm run test:ui
+npm run check
+cargo test --manifest-path src-tauri/Cargo.toml --locked
 npm run tauri:build
+npm run desktop:verify-mac
 ```
 
-macOS 需要 Rust toolchain 和 Xcode Command Line Tools。Apple Silicon / Intel 都应保持源码兼容，但安装包签名、公证不在第一版范围内。
+`tauri.macos.conf.json` 会自动合并到基础配置。打包前复制当前 arm64 Node 可执行文件及对应官方许可证；只打包指定的同步脚本和样式，不包含 `.env`、API Key、个人配置、笔记或状态。Node 作为 Tauri 外部程序一并签名，应用从包内绝对路径启动它，不依赖 Finder 的 PATH 或本机 Node。[Tauri 内置 Node 方案](https://v2.tauri.app/learn/sidecar-nodejs/)
+
+产物分别位于 `src-tauri/target/release/bundle/macos/` 和 `src-tauri/target/release/bundle/dmg/`。开发调试仍使用项目内 `.steam-experience-sync/config.json`，与安装版配置分开。
+
+GitHub 构建会检查包内 Node 的 arm64 架构、离线保存/重新读取配置、worker 状态和代码签名；这些检查不发送 Steam 请求，不能代替 Mac 实机的界面和真实同步验收。
+
+**多设备注意：** 每台设备分别配置自己的仓库路径。如果通过 Obsidian 同步服务共享笔记，也需要确认 `.obsidian/steam-experience-sync/` 状态目录是否被同步；不要同时在 PC 和 Mac 上运行 worker。本机进程锁不是跨设备锁，无法保护两台电脑同时同步的情况。
 
 ### 桌面应用界面
 
@@ -170,7 +194,7 @@ macOS 需要 Rust toolchain 和 Xcode Command Line Tools。Apple Silicon / Intel
 
 日常增量同步直接写入笔记，不需要预览确认。历史补录时先用 `--plan-writes` 生成待写入队列，再检查与写入（见"全量导入建议"）。
 
-API Key 在 GUI 中默认以密码框显示；`.steam-experience-sync/config.json` 已被 `.gitignore` 忽略，不要提交真实密钥。
+API Key 在 GUI 中默认以密码框显示；源码运行的 `.steam-experience-sync/config.json` 已被 `.gitignore` 忽略，Mac 安装版配置在上述用户目录中。不要提交真实密钥。
 
 ## Obsidian 输出
 
