@@ -1,0 +1,41 @@
+Switch account protocol reference and adaptation
+Dycool/NSO-Album-Sync
+Revision: 4fc49154aa984b85e0c5d3f67a977021a81274b7
+https://github.com/Dycool/NSO-Album-Sync
+
+MIT License
+
+Copyright (c) 2026 Diogo Enes
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+Bundled Nintendo album client
+nxapi by Samuel Thomas
+Version: 1.6.1-next.257 (47c9d35d9d51d33e62dd6d3733b616e0ad31b02b)
+https://github.com/samuelthomas2774/nxapi
+https://github.com/samuelthomas2774/nxapi/tree/47c9d35d9d51d33e62dd6d3733b616e0ad31b02b
+License: AGPL-3.0-or-later; full text in NXAPI-AGPL-LICENSE.txt.
+The published CLI remains a separate background process. It is installed from
+the pinned npm package with its original metadata and client authentication.
+src/switch/nxapi-preload.mjs is an AGPL-3.0-or-later storage/privacy adapter.
+It keeps Nintendo credentials in memory/OS credentials storage and disables
+the album command's unrelated friend/chat/service/event/announcement calls.
+Other dependency licenses are included in tools/nxapi-client/node_modules.
+This is a local integration; public distribution requires a review of the
+combined distribution and corresponding-source requirements.

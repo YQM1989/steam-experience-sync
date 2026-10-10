@@ -5,6 +5,7 @@ import { notifyPausedByRateLimit } from './notifications';
 import { Settings } from './Settings';
 import { getLogs, getStatus, startWorkerLoop, stopWorker, WorkerStatus } from './tauriApi';
 import { listen } from '@tauri-apps/api/event';
+import { SwitchPanel } from './SwitchPanel';
 
 type Tab = 'dashboard' | 'logs' | 'settings';
 
@@ -16,6 +17,7 @@ const tabs: Array<{ id: Tab; label: string }> = [
 
 export function App() {
   const [activeTab, setActiveTab] = useState<Tab>('dashboard');
+  const [platform, setPlatform] = useState<'steam' | 'switch'>('steam');
   const [status, setStatus] = useState<WorkerStatus | string | null>(null);
   const [logs, setLogs] = useState('');
   const [liveOutput, setLiveOutput] = useState<string[]>([]);
@@ -101,6 +103,10 @@ export function App() {
 
   return (
     <main className="app-shell">
+      <div className="platformbar" role="group" aria-label="游戏平台">
+        <button aria-pressed={platform === 'steam'} onClick={() => setPlatform('steam')}>Steam</button>
+        <button aria-pressed={platform === 'switch'} onClick={() => setPlatform('switch')}>Switch 2</button>
+      </div>
       <nav className="tabbar" aria-label="Main navigation">
         {tabs.map((tab) => (
           <button
@@ -112,7 +118,8 @@ export function App() {
           </button>
         ))}
       </nav>
-      {activeTab === 'dashboard' ? (
+      {platform === 'switch' ? <SwitchPanel tab={activeTab} /> : null}
+      {platform === 'steam' && activeTab === 'dashboard' ? (
         <Dashboard
           busy={busy}
           isWorkerRunning={isWorkerRunning}
@@ -123,8 +130,8 @@ export function App() {
           onStop={stop}
         />
       ) : null}
-      {activeTab === 'logs' ? <Logs busy={busy} logs={logs} onRefresh={refresh} /> : null}
-      {activeTab === 'settings' ? <Settings /> : null}
+      {platform === 'steam' && activeTab === 'logs' ? <Logs busy={busy} logs={logs} onRefresh={refresh} /> : null}
+      {platform === 'steam' && activeTab === 'settings' ? <Settings /> : null}
     </main>
   );
 }

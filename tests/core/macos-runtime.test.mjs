@@ -35,6 +35,8 @@ test('Mac bundle only includes explicit code resources and its runtime', async (
   const config = JSON.parse(await fs.readFile(new URL('../../src-tauri/tauri.macos.conf.json', import.meta.url)));
   assert.deepEqual(config.bundle.externalBin, ['runtime/steam-node']);
   assert.deepEqual(Object.keys(config.bundle.resources).sort(), [
-    '../docs/obsidian-steam-experience.css', '../package.json', '../src/', 'runtime/NODE-LICENSE',
+    '../docs/NXAPI-AGPL-LICENSE.txt', '../docs/THIRD-PARTY-NOTICES-SWITCH.txt', '../docs/obsidian-steam-experience.css', '../docs/obsidian-switch-experience.css',
+    '../docs/switch-reflection-view.js',
+    '../package.json', '../src/', '../tools/nxapi-client/', 'runtime/NODE-LICENSE',
   ]);
 });

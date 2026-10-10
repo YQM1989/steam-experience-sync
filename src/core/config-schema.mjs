@@ -18,13 +18,30 @@ export const DEFAULT_GUI_CONFIG = {
   workerMaxDetailScans: 3,
   workerMode: 'feed',
   speedMode: 'balanced',
+  switch: {
+    source: 'local',
+    nxapiClientId: '',
+    nxapiClientVersion: '',
+    thirdPartyConsent: false,
+    albumDir: '',
+    experienceDir: '00_输入源/50_我是谁/Switch体验记录',
+    attachmentDir: '附件/Switch体验记录',
+    filenameTimezone: '+08:00',
+    games: {},
+  },
 };
 
 export function normalizeGuiConfig(input = {}) {
   const { previewMode: _legacyPreviewMode, ...rest } = input;
+  const switchInput = input.switch || {};
   return {
     ...DEFAULT_GUI_CONFIG,
     ...rest,
+    switch: {
+      ...DEFAULT_GUI_CONFIG.switch,
+      ...switchInput,
+      games: switchInput.games || {},
+    },
     requestDelayMs: numberAtLeast(input.requestDelayMs, SAFE_REQUEST_DELAY_MS),
     pageDelayMs: numberAtLeast(input.pageDelayMs, SAFE_PAGE_DELAY_MS),
     workerLoopDelayMs: numberAtLeast(input.workerLoopDelayMs, SAFE_WORKER_LOOP_DELAY_MS),

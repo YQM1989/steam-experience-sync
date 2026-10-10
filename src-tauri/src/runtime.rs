@@ -14,6 +14,18 @@ pub struct RuntimePaths {
 
 impl RuntimePaths {
     pub fn resolve(_app: &tauri::AppHandle) -> Result<Self, String> {
+        let mut runtime = Self::resolve_default(_app)?;
+        if let Some(value) = std::env::var_os("STEAM_GUI_CONFIG_FILE") {
+            let config_file = PathBuf::from(value);
+            if !config_file.is_absolute() {
+                return Err("STEAM_GUI_CONFIG_FILE must be an absolute path.".into());
+            }
+            runtime.config_file = config_file;
+        }
+        Ok(runtime)
+    }
+
+    fn resolve_default(_app: &tauri::AppHandle) -> Result<Self, String> {
         // Installed Mac apps must never depend on a checkout or Finder's PATH.
         #[cfg(all(target_os = "macos", not(debug_assertions)))]
         {

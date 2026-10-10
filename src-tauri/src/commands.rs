@@ -377,3 +377,97 @@ pub fn write_config(app: tauri::AppHandle, payload: String) -> Result<CommandRes
         Err(String::from_utf8_lossy(&output.stderr).to_string())
     }
 }
+
+#[tauri::command]
+pub async fn switch_action(
+    app: tauri::AppHandle,
+    action: String,
+    payload: Option<String>,
+) -> Result<String, String> {
+    if !matches!(
+        action.as_str(),
+        "status"
+            | "logs"
+            | "sync"
+            | "stop"
+            | "preview"
+            | "save-settings"
+            | "save-game"
+            | "install-style"
+            | "account-status"
+            | "login-start"
+            | "login-finish"
+            | "disconnect"
+            | "check-service"
+    ) {
+        return Err("Unsupported Switch operation".into());
+    }
+    let payload = payload.unwrap_or_else(|| "{}".into());
+    if payload.len() > 1024 * 1024 {
+        return Err("Switch settings payload is too large".into());
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        let runtime = RuntimePaths::resolve(&app)?;
+        let account_source = fs::read_to_string(&runtime.config_file)
+            .ok()
+            .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
+            .is_some_and(|value| value["switch"]["source"] == "account");
+        let uses_credentials = matches!(action.as_str(), "account-status" | "login-start" | "login-finish" | "disconnect" | "check-service")
+            || (account_source && matches!(action.as_str(), "sync" | "preview"));
+        // Account transactions share mutable credentials; stop/status remain responsive.
+        static ACCOUNT_OPERATION: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let _guard = if uses_credentials {
+            Some(ACCOUNT_OPERATION.lock().map_err(|_| "账号操作暂不可用，请重启应用。")?)
+        } else { None };
+        let credentials = if uses_credentials {
+            crate::switch_credentials::load(&runtime.config_file)?
+        } else { serde_json::json!({}) };
+        let input = serde_json::json!({
+            "payload": serde_json::from_str::<serde_json::Value>(&payload).map_err(|_| "Switch 设置格式无效。")?,
+            "credentials": credentials,
+        });
+        let mut child = runtime
+            .command()
+            .args(["src/switch/index.mjs", &action, "--native-bridge"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|error| error.to_string())?;
+        if let Some(mut stdin) = child.stdin.take() {
+            stdin
+                .write_all(input.to_string().as_bytes())
+                .map_err(|error| error.to_string())?;
+        }
+        let output = child
+            .wait_with_output()
+            .map_err(|error| error.to_string())?;
+        if output.status.success() {
+            let envelope: serde_json::Value = serde_json::from_slice(&output.stdout)
+                .map_err(|_| "Switch 同步未返回有效结果。")?;
+            if uses_credentials && action != "account-status" {
+                let next = envelope.get("credentials").filter(|value| value.is_object())
+                    .ok_or("Switch 登录信息返回格式无效，未覆盖钥匙串。")?;
+                crate::switch_credentials::save(&runtime.config_file, next)?;
+            }
+            if let Some(error) = envelope["error"].as_str() { return Err(error.to_owned()); }
+            let result = &envelope["result"];
+            if action == "login-start" {
+                let url = result["url"].as_str().ok_or("Nintendo 登录链接缺失。")?;
+                if !url.starts_with("https://accounts.nintendo.com/connect/1.0.0/authorize?") {
+                    return Err("Nintendo 登录地址无效。".into());
+                }
+                #[cfg(target_os = "macos")]
+                if !Command::new("/usr/bin/open").arg(url).status().map_err(|_| "无法打开浏览器。")?.success() {
+                    return Err("无法打开 Nintendo 登录网页。".into());
+                }
+            }
+            Ok(result.to_string())
+        } else {
+            // A crashed auth process may include credentials in diagnostics.
+            Err("Switch 同步进程未能完成，请检查配置并重试。".into())
+        }
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}

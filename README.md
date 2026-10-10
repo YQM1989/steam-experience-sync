@@ -1,8 +1,22 @@
-# Steam Experience Sync
+# Game Memories · 游戏回忆
 
-把公开 Steam 截图动态同步到 Obsidian 的轻量工具。目标不是备份完整游戏库，而是记录“我主动截图并写过评价的游戏体验”。
+Steam 与 Nintendo Switch 2 共用一个桌面应用，按游戏和拍摄日期保存截图、视频与个人感想到 Obsidian。Switch 一键同步及独立感想输入区见 [使用说明](docs/switch-experience.md)。
 
-## 当前能力
+应用已更名为 **Game Memories**。内部应用标识、配置位置和已有同步状态保留兼容；更新后继续读取原账号授权与笔记。
+
+Steam 部分读取公开截图动态，记录“我主动截图并写过评价的游戏体验”；Switch 部分读取已上传的账号云相册，保留截图、视频、拍摄日期及自己补写的回忆。
+
+版本变化见 [改动说明](CHANGELOG.md)，nxapi 接入过程与排错边界见 [接入复盘](docs/nxapi-integration-notes.md)。
+
+## Switch 2 一键同步
+
+Mac 安装版已自带相册客户端。切换到 Switch 2 → Settings，设置 Obsidian 仓库并阅读第三方数据流向，完成一次 Nintendo 网页授权；之后点击「开始同步」即可检查新增内容并归档，不需要单独启动 nxapi 或登录 Discord。
+
+每款游戏一份笔记，媒体在左、感想在右，使用原始拍摄时间。重复同步保留手写内容；已启用 Dataview JavaScript 的仓库可使用独立感想输入框，其他仓库保留普通 Markdown 编辑。新游戏的海报可在界面选择本地 JPG／PNG。
+
+此流程仍依赖 nxapi 远程认证及加解密服务，读取的是已上传的云相册；它不等同于读取主机全部本地相册。账号凭据保存在 macOS 钥匙串。Windows 账号存储及新版安装包尚未完成适配和真机验证，详见 [Switch 使用说明](docs/switch-experience.md)。
+
+## Steam 当前能力
 
 - 读取公开 Steam 截图页面，提取截图 ID、游戏名、appid、评价文字、截图图片和发布时间。
 - 按游戏归档到 Obsidian：一款游戏一个 Markdown 文件，截图在文件内按日期分段。
@@ -14,7 +28,7 @@
 - 支持 pending write preview：先用 `--plan-writes` 生成待写入队列，检查后再写入（`--apply-pending`）或跳过（`--clear-pending`）。
 - 遇到 429 会冷却；连续 3 次限流失败会暂停 worker 并通知。
 
-## 不做什么
+## Steam 读取边界
 
 - 不读取好友可见或私密内容。
 - 不保存 Cookie、不复用 Steam 登录态。
@@ -154,8 +168,8 @@ src-tauri\target\release\bundle\
 **直接安装使用：**
 
 1. 打开仓库的 [Actions](https://github.com/YQM1989/steam-experience-sync/actions/workflows/build-macos.yml)，选择最近一次成功的 `Build Apple Silicon Mac App`。
-2. 下载该次构建的 `Steam-Experience-Sync-macOS-arm64` 附件，解压得到 `.dmg`。
-3. 打开 `.dmg`，把 `Steam Experience Sync.app` 拖到“应用程序”，之后双击启动。
+2. 下载该次构建的 `Game-Memories-macOS-arm64` 附件，解压得到 `.dmg`。
+3. 打开 `.dmg`，把 `Game Memories.app` 拖到“应用程序”，之后双击启动。
 4. 在 Settings 填写 Steam ID、可选 API Key，以及 **Mac 上的 Obsidian 仓库根目录**，例如 `/Users/你的用户名/Documents/YQM-Obsidian`。不要填写 `Steam体验记录` 子目录，也不要使用 Windows 的 `D:\...` 路径。
 5. 保存设置，再在 Dashboard 开始同步。同步逻辑与 Windows 相同，不会自动改成全量历史扫描。
 
@@ -231,3 +245,9 @@ docs\obsidian-steam-experience.css
 5. 历史很多时按 `--appid` 一款游戏一款游戏处理。
 
 不要连续高频全量回扫。遇到 429 时先等待冷却，再提高 `STEAM_REQUEST_DELAY_MS` 和 `STEAM_PAGE_DELAY_MS`。
+
+## 许可证与第三方组件
+
+原项目的 MIT 许可见 [LICENSE](LICENSE)。nxapi 发布客户端及 `src/switch/nxapi-preload.mjs` 存储适配文件使用 AGPL-3.0-or-later；不能将根目录的 MIT 许可解释为覆盖这些组件。许可全文、固定版本和对应源码位置见 [第三方说明](docs/THIRD-PARTY-NOTICES-SWITCH.txt) 及 [AGPL 全文](docs/NXAPI-AGPL-LICENSE.txt)。
+
+仓库包含本项目集成源码与适配文件；固定 nxapi 包通过独立锁文件获取，依赖目录、凭据及真实相册素材不提交。公开组合安装包时须核对相应源码与许可证要求，不因使用子进程就认定这些要求不适用。

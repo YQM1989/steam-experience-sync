@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "build": {
-    "beforeDevCommand": "npm run desktop:prepare && npm run ui:dev",
-    "beforeBuildCommand": "npm run desktop:prepare && npm run ui:build"
+    "beforeDevCommand": "npm run switch:prepare && npm run desktop:prepare && npm run ui:dev",
+    "beforeBuildCommand": "npm run switch:prepare && npm run desktop:prepare && npm run ui:build"
   },
   "bundle": {
     "targets": ["app", "dmg"],
@@ -12,6 +12,11 @@
       "../src/": "worker/src/",
       "../package.json": "worker/package.json",
       "../docs/obsidian-steam-experience.css": "worker/docs/obsidian-steam-experience.css",
+      "../docs/obsidian-switch-experience.css": "worker/docs/obsidian-switch-experience.css",
+      "../docs/switch-reflection-view.js": "worker/docs/switch-reflection-view.js",
+      "../docs/THIRD-PARTY-NOTICES-SWITCH.txt": "worker/docs/THIRD-PARTY-NOTICES-SWITCH.txt",
+      "../docs/NXAPI-AGPL-LICENSE.txt": "worker/docs/NXAPI-AGPL-LICENSE.txt",
+      "../tools/nxapi-client/": "worker/tools/nxapi-client/",
       "runtime/NODE-LICENSE": "worker/NODE-LICENSE"
     },
     "macOS": {

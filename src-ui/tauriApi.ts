@@ -51,7 +51,44 @@ export type GuiConfig = {
   workerLoopDelayMs: number;
   workerMaxDetailScans: number;
   workerMode: 'feed' | 'appid';
+  switch?: SwitchConfig;
 };
+
+export type SwitchConfig = {
+  source: 'local' | 'account';
+  nxapiClientId?: string;
+  nxapiClientVersion?: string;
+  thirdPartyConsent?: boolean;
+  albumDir: string;
+  experienceDir: string;
+  attachmentDir: string;
+  filenameTimezone: string;
+  games: Record<string, { name?: string; coverFile?: string }>;
+};
+
+export type SwitchGame = {
+  id: string;
+  name: string;
+  count: number;
+  note?: string;
+  cover?: string;
+  coverFile?: string;
+};
+
+export type SwitchStatus = {
+  configured: boolean;
+  running: boolean;
+  imported: number;
+  games: SwitchGame[];
+  lastRunAt: string | null;
+  lastError: string | null;
+  lastResult: { imported: number; duplicates: number; stopped: boolean; skipped: Array<{ file: string; reason: string }> } | null;
+};
+
+export async function switchAction<T>(action: string, payload: unknown = {}): Promise<T> {
+  const raw = await invoke<string>('switch_action', { action, payload: JSON.stringify(payload) });
+  return JSON.parse(raw) as T;
+}
 
 export type DiscoveredGame = {
   appid: string;

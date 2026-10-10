@@ -1,8 +1,8 @@
 {
-  "name": "steam-experience-sync",
-  "version": "0.1.0",
+  "name": "game-memories",
+  "version": "0.2.0",
   "type": "module",
-  "description": "Sync public Steam screenshot notes into an Obsidian vault.",
+  "description": "Collect Steam and Nintendo Switch game memories in Obsidian.",
   "bin": {
     "steam-experience-sync": "src/index.mjs"
   },
@@ -26,6 +26,10 @@
     "desktop:prepare": "node scripts/prepare-macos-runtime.mjs",
     "desktop:verify-mac": "node scripts/verify-macos-bundle.mjs",
     "test": "node --test tests/**/*.test.mjs",
+    "switch:status": "node src/switch/index.mjs status",
+    "switch:prepare": "node scripts/prepare-nxapi-client.mjs",
+    "switch:preview": "node src/switch/index.mjs preview",
+    "switch:import": "node src/switch/index.mjs sync",
     "test:ui": "vitest run",
     "check": "node --check src/index.mjs && node --check src/gui.mjs && npm run ui:build"
   },

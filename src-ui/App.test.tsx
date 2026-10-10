@@ -1,5 +1,5 @@
-import { render, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from './App';
 
 const { MOCK_STATUS } = vi.hoisted(() => ({
@@ -58,7 +58,10 @@ vi.mock('./tauriApi', () => ({
   startWorkerLoop: vi.fn().mockResolvedValue({ ok: true, message: 'started' }),
   stopWorker: vi.fn().mockResolvedValue({ ok: true, message: 'stopped' }),
   writeConfig: vi.fn().mockResolvedValue({ ok: true, message: 'saved' }),
+  switchAction: vi.fn().mockImplementation(async (action: string) => action === 'status' ? { configured: false, running: false, imported: 0, games: [] } : ''),
 }));
+
+afterEach(cleanup);
 
 describe('App', () => {
   it('renders navigation tabs and worker control buttons', () => {
@@ -72,5 +75,17 @@ describe('App', () => {
     expect(screen.getByRole('button', { name: '开始同步' })).toBeTruthy();
     expect(screen.getByRole('button', { name: '停止' })).toBeTruthy();
     expect(screen.getByRole('button', { name: '刷新状态' })).toBeTruthy();
+  });
+
+  it('switches platforms without replacing Steam settings or controls', async () => {
+    render(<App />);
+    fireEvent.click(screen.getByRole('button', { name: 'Switch 2' }));
+    expect(await screen.findByRole('heading', { name: 'Switch 游戏回忆' })).toBeTruthy();
+    expect(screen.getAllByRole('button', { name: '开始同步' })).toHaveLength(1);
+    expect(screen.queryByRole('button', { name: /^停止$/ })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    expect(await screen.findByLabelText('导出的相册目录')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Steam' }));
+    expect(await screen.findByLabelText('Steam API Key')).toBeTruthy();
   });
 });

@@ -1,0 +1,9 @@
+{
+  "dependencies": {
+    "nxapi": "1.6.1-next.257"
+  },
+  "name": "steam-switch-nxapi-client",
+  "version": "0.1.0",
+  "private": true,
+  "license": "AGPL-3.0-or-later"
+}

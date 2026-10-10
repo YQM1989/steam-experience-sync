@@ -5,7 +5,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 if (process.platform !== 'darwin') throw new Error('Bundle verification must run on macOS.');
-const app = path.resolve(process.argv[2] || 'src-tauri/target/release/bundle/macos/Steam Experience Sync.app');
+const app = path.resolve(process.argv[2] || 'src-tauri/target/release/bundle/macos/Game Memories.app');
 const worker = path.join(app, 'Contents/Resources/worker');
 const node = path.join(app, 'Contents/MacOS/steam-node');
 const temporary = await fs.mkdtemp(path.join(os.tmpdir(), 'steam-bundle-check-'));
@@ -13,9 +13,11 @@ try {
   const configFile = path.join(temporary, 'Application Support', 'config.json');
   const env = {
     PATH: '/usr/bin:/bin',
-    HOME: temporary,
     TMPDIR: temporary,
     STEAM_GUI_CONFIG_FILE: configFile,
+    NXAPI_DEBUG_FILE: '0',
+    NXAPI_SKIP_UPDATE_CHECK: '1',
+    NXAPI_USER_AGENT: 'game-memories-bundle-check/0.2.0 (+https://github.com/YQM1989/steam-experience-sync)',
   };
   function run(args) {
     const result = spawnSync(node, args, { cwd: worker, env, encoding: 'utf8', timeout: 30000 });
@@ -40,6 +42,18 @@ try {
   env.STEAM_REQUEST_DELAY_MS = String(stored.requestDelayMs);
   const configuredStatus = JSON.parse(run(['src/index.mjs', '--worker-status-json', '--no-adaptive']));
   assert.equal(configuredStatus.configuredLoopDelayMs, 60000);
+  const switchStatus = JSON.parse(run(['src/switch/index.mjs', 'status']));
+  assert.equal(switchStatus.imported, 0);
+  assert.ok((await fs.readFile(path.join(worker, 'docs/obsidian-switch-experience.css'), 'utf8')).includes('switch-memory'));
+  assert.ok((await fs.readFile(path.join(worker, 'docs/THIRD-PARTY-NOTICES-SWITCH.txt'), 'utf8')).includes('MIT License'));
+  const nativeStatus = JSON.parse(run(['src/switch/index.mjs', 'status', '--native-bridge']));
+  assert.equal(nativeStatus.result.imported, 0);
+  assert.deepEqual(nativeStatus.credentials, {});
+  const helper = path.join(worker, 'tools/nxapi-client/node_modules/nxapi');
+  const helperPackage = JSON.parse(await fs.readFile(path.join(helper, 'package.json'), 'utf8'));
+  assert.ok(helperPackage.version.startsWith('1.6.1-next.257'));
+  assert.ok((await fs.readFile(path.join(worker, 'docs/NXAPI-AGPL-LICENSE.txt'), 'utf8')).includes('GNU AFFERO GENERAL PUBLIC LICENSE'));
+  assert.ok(run([path.join(helper, 'bin/nxapi.js'), 'nso', 'album', '--help']).includes('Nintendo Switch 2 album'));
   console.log('Bundled arm64 Node, config save/reopen and offline worker status verified without system Node or Steam requests.');
 } finally {
   await fs.rm(temporary, { recursive: true, force: true });

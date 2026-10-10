@@ -52,10 +52,10 @@ jobs:
       - name: Verify packaged runtime and ad-hoc signatures offline
         run: |
           npm run desktop:verify-mac
-          codesign --verify --deep --strict "src-tauri/target/release/bundle/macos/Steam Experience Sync.app"
+          codesign --verify --deep --strict "src-tauri/target/release/bundle/macos/Game Memories.app"
       - uses: actions/upload-artifact@v4
         with:
-          name: Steam-Experience-Sync-macOS-arm64
+          name: Game-Memories-macOS-arm64
           path: src-tauri/target/release/bundle/dmg/*.dmg
           if-no-files-found: error
           retention-days: 30

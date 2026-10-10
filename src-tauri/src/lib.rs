@@ -1,5 +1,6 @@
 mod commands;
 mod runtime;
+mod switch_credentials;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -12,7 +13,8 @@ pub fn run() {
             commands::read_config,
             commands::start_worker_loop,
             commands::stop_worker,
-            commands::write_config
+            commands::write_config,
+            commands::switch_action
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

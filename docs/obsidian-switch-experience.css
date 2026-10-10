@@ -1,0 +1,75 @@
+/* Game Experience Sync: Switch */
+.markdown-preview-view.switch-experience .metadata-container {
+  display: none;
+}
+.switch-experience .callout[data-callout="switch-game"] {
+  --callout-color: 176, 120, 100;
+  margin: 16px 0 32px;
+}
+.switch-experience .callout[data-callout="switch-memory"] {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  margin: 24px 0 36px;
+}
+.switch-experience .callout[data-callout="switch-memory"] > .callout-content {
+  display: grid;
+  grid-template-columns: minmax(0, 1.8fr) minmax(220px, 1fr);
+  gap: 20px;
+  align-items: stretch;
+}
+.switch-experience .callout[data-callout="switch-memory"] > .callout-title {
+  margin: 0 0 12px;
+  font-size: .9em;
+  color: var(--text-muted);
+}
+.switch-experience .callout[data-callout="switch-media"] {
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  border: 0;
+}
+.switch-experience .callout[data-callout="switch-media"] > .callout-title {
+  display: none;
+}
+.switch-experience .callout[data-callout="switch-media"] img,
+.switch-experience .callout[data-callout="switch-media"] video {
+  width: 100%;
+  height: auto;
+  max-height: 520px;
+  object-fit: contain;
+  border-radius: 10px;
+}
+.switch-experience .callout[data-callout="switch-reflection"] {
+  --callout-color: 156, 146, 174;
+  margin: 0;
+  padding: 20px;
+  border-radius: 10px;
+  background: var(--background-secondary);
+}
+.switch-experience .callout[data-callout="switch-reflection"] .callout-content {
+  user-select: text;
+}
+.switch-reflection-input {
+  display: block;
+  width: 100%;
+  min-height: 150px;
+  padding: 10px;
+  resize: vertical;
+  color: var(--text-normal);
+  font: inherit;
+  line-height: 1.6;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  background: var(--background-primary);
+}
+.switch-reflection-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 10px; }
+.switch-reflection-tools span { color: var(--text-muted); font-size: .8em; }
+.switch-experience .callout[data-callout="switch-memory"] > .callout-content > p:empty {
+  display: none;
+}
+@media (max-width: 700px) {
+  .switch-experience .callout[data-callout="switch-memory"] > .callout-content {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

@@ -33,6 +33,13 @@ body {
   margin-top: 18px;
 }
 
+.platformbar { display: flex; gap: 8px; margin-bottom: 18px; }
+.platformbar button[aria-pressed="true"] { border-color: #9f8fff; background: #302a52; }
+.game-settings { display: grid; gap: 16px; }
+.game-editor { display: grid; gap: 10px; border: 1px solid #353535; border-radius: 8px; padding: 16px; }
+.game-editor label { display: grid; gap: 6px; font-size: 13px; color: #b8b3ad; }
+.game-editor p { margin: 4px 0; overflow-wrap: anywhere; }
+
 .tabbar {
   display: flex;
   flex-wrap: wrap;
@@ -427,3 +434,6 @@ th {
     justify-items: start;
   }
 }
+.account-connect { margin: 28px 0; padding-top: 20px; border-top: 1px solid var(--border-color, #444); }
+.consent-label { display: flex; gap: 12px; align-items: center; margin: 16px 0; }
+.consent-label input { width: auto; }
