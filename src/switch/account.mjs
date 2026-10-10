@@ -12,7 +12,7 @@ const REDIRECT = `npf${NINTENDO_CLIENT}://auth`;
 const CORAL = 'https://api-lp1.znc.srv.nintendo.net';
 const ZNCA = 'https://nxapi-znca-api.fancy.org.uk/api/znca';
 const NXAUTH = 'https://nxapi-auth.fancy.org.uk/api/oauth/token';
-const AGENT = 'steam-experience-sync/0.1.0 (+https://github.com/YQM1989/steam-experience-sync)';
+const AGENT = 'steam-experience-sync/0.1.0 (+https://github.com/YQM1989/game-memories)';
 const hash = (value) => createHash('sha256').update(value).digest('hex');
 const REQUEST_STAGES = new Map([
   ['https://accounts.nintendo.com/connect/1.0.0/api/session_token', 'Nintendo 授权码兑换'],
